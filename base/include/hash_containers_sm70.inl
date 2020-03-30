@@ -1359,11 +1359,6 @@ bool Hash_map<Key_type, T, SMEM_SIZE, NUM_HASH_FCTS, WARP_SIZE>::update( Key_typ
 
     for ( int i_hash = 0 ; i_hash < NUM_HASH_FCTS ; ++i_hash )
     {
-        if ( i_hash > 0 && utils::all(done) )
-        {
-            break;
-        }
-
         unsigned ukey = reinterpret_cast<unsigned &>( key );
         int hash = ( (ukey ^ c_hash_keys[i_hash]) + c_hash_keys[NUM_HASH_FCTS + i_hash] ) & (SMEM_SIZE - 1);
 
