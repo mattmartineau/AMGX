@@ -1359,11 +1359,11 @@ bool Hash_map<Key_type, T, SMEM_SIZE, NUM_HASH_FCTS, WARP_SIZE>::update( Key_typ
 
     for ( int i_hash = 0 ; i_hash < NUM_HASH_FCTS ; ++i_hash )
     {
-        unsigned ukey = reinterpret_cast<unsigned &>( key );
-        int hash = ( (ukey ^ c_hash_keys[i_hash]) + c_hash_keys[NUM_HASH_FCTS + i_hash] ) & (SMEM_SIZE - 1);
-
         if ( !done )
         {
+            unsigned ukey = reinterpret_cast<unsigned &>( key );
+            int hash = ( (ukey ^ c_hash_keys[i_hash]) + c_hash_keys[NUM_HASH_FCTS + i_hash] ) & (SMEM_SIZE - 1);
+
             Key_type stored_key = m_smem_keys[hash];
 
             if ( stored_key == key )
@@ -1396,16 +1396,11 @@ bool Hash_map<Key_type, T, SMEM_SIZE, NUM_HASH_FCTS, WARP_SIZE>::update( Key_typ
 
     for ( int i_hash = 0 ; i_hash < NUM_HASH_FCTS ; ++i_hash )
     {
-        if ( utils::all(done) )
-        {
-            return found;
-        }
-
-        unsigned ukey = reinterpret_cast<unsigned &>( key );
-        int hash = utils::bfe( (ukey ^ c_hash_keys[i_hash]) + c_hash_keys[NUM_HASH_FCTS + i_hash], num_bits );
-
         if ( !done )
         {
+            unsigned ukey = reinterpret_cast<unsigned &>( key );
+            int hash = utils::bfe( (ukey ^ c_hash_keys[i_hash]) + c_hash_keys[NUM_HASH_FCTS + i_hash], num_bits );
+
             Key_type stored_key = m_gmem_keys[hash];
 
             if ( stored_key == key )

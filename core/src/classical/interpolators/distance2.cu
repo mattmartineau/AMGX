@@ -1807,13 +1807,7 @@ compute_interp_weight_kernel( const int A_num_rows,
                     if ( b_col_it < b_col_end )
                     {
                         b_col_id = A_cols[b_col_it];
-                        b_value  = A_vals[b_col_it];
-                    }
-
-                    // Update bValue if needed.
-                    if ( sign( b_diag ) == sign( b_value ) )
-                    {
-                        b_value = Value_type(0);
+                        b_value = ( sign( b_diag ) == sign( A_vals[b_col_it] ) ) ? 0.0 : A_vals[b_col_it];
                     }
 
                     // See if we have found a_row_id in the row. Only one thread can evaluate to true.
