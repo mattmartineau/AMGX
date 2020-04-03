@@ -286,6 +286,10 @@ void Classical_AMG_Level<TemplateConfig<AMGX_host, t_vecPrec, t_matPrec, t_indPr
 template <AMGX_VecPrecision t_vecPrec, AMGX_MatPrecision t_matPrec, AMGX_IndPrecision t_indPrec>
 void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indPrec> >::createCoarseMatricesFlattened()
 {
+    Matrix<TConfig_d> &RAP = this->getNextLevel( typename Matrix<TConfig_d>::memory_space( ) )->getA( );
+    Matrix<TConfig_d> &A = this->getA();
+    Matrix<TConfig_d> &P = this->P;
+
     #if 0
     // allocate aggressive interpolator if needed
     if (AMG_Level<TConfig_d>::getLevelIndex() < this->num_aggressive_levels)
@@ -296,9 +300,6 @@ void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
     }
     #endif
 
-    Matrix<TConfig_d> &RAP = this->getNextLevel( typename Matrix<TConfig_d>::memory_space( ) )->getA( );
-    Matrix<TConfig_d> &A = this->getA();
-    Matrix<TConfig_d> &P = this->P;
     /* WARNING: exit if D1 interpolator is selected in distributed setting */
     std::string s("");
     s += AMG_Level<TConfig_d>::amg->m_cfg->AMG_Config::getParameter<std::string>("interpolator", AMG_Level<TConfig_d>::amg->m_cfg_scope);
@@ -375,7 +376,53 @@ void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
     IVector_h P_halo_offsets = P.manager->halo_offsets;
     // Create a temporary distributed arranger
     DistributedArranger<TConfig_d> *prep = new DistributedArranger<TConfig_d>;
-    prep->exchange_halo_rows_P(A, P, RAP.manager->local_to_global_map, P_neighbors, P_halo_ranges_h, P_halo_ranges, P_halo_offsets, RAP.manager->part_offsets_h, RAP.manager->part_offsets, num_owned_coarse_pts, RAP.manager->part_offsets_h[my_rank]);
+    #if 0
+        prep->exchange_halo_rows_P(A, P, RAP.manager->local_to_global_map, P_neighbors, P_halo_ranges_h, P_halo_ranges, P_halo_offsets, RAP.manager->part_offsets_h, RAP.manager->part_offsets, num_owned_coarse_pts, RAP.manager->part_offsets_h[my_rank]);
+    #else
+        if (P.hasProps(DIAG) || P.get_block_size() != 1)
+        {
+            FatalError("P with external diagonal or block_size != 1 not supported", AMGX_ERR_NOT_IMPLEMENTED);
+        }
+
+        typedef typename Matrix<TConfig_d>::MVector MVector;
+        std::vector<IVector> halo_rows_P_row_offsets;
+        std::vector<I64Vector> halo_rows_P_col_indices;
+        std::vector<IVector> halo_rows_P_local_col_indices;
+        std::vector<MVector> halo_rows_P_values;
+
+        // In this function, store in halo_rows_P_row_offsets, halo_rows_P_col_indices and halo_rows_P_values, the rows of P that need to be sent to each neighbors
+        // halo_rows_P_col_indices stores global indices
+
+        //prep->exchange_halo_rows_P(A, P, RAP.manager->local_to_global_map, P_neighbors, P_halo_ranges_h, P_halo_ranges, P_halo_offsets, RAP.manager->part_offsets_h, RAP.manager->part_offsets, num_owned_coarse_pts, RAP.manager->part_offsets_h[my_rank]);
+        //exchange_halo_rows_P(&A, &P, I64Vector &RAP_local_to_global_map, IVector_h &P_neighbors, I64Vector_h &P_halo_ranges_h, I64Vector &P_halo_ranges, IVector_h &P_halo_offsets, I64Vector_h &RAP_part_offsets_h, I64Vector &RAP_part_offsets, index_type num_owned_coarse_pts, int64_t coarse_base_index)
+        prep->pack_halo_rows_P(A, P, halo_rows_P_row_offsets, halo_rows_P_col_indices, halo_rows_P_values, RAP.manager->local_to_global_map, num_owned_coarse_pts, RAP.manager->part_offsets_h[my_rank]);
+
+        // Do the exchange with the neighbors
+        // On return, halo_rows_P_rows_offsets, halo_rows_P_col_indices and halo_rows_P_values stores the rows of P received from each neighbor (rows needed to perform A*P)
+        std::vector<I64Vector> dummy_halo_ids(0);
+        A.manager->getComms()->exchange_matrix_halo(halo_rows_P_row_offsets, halo_rows_P_col_indices, halo_rows_P_values, dummy_halo_ids, A.manager->neighbors, A.manager->global_id());
+        halo_rows_P_local_col_indices.resize(halo_rows_P_col_indices.size());
+
+        for (int i = 0; i < halo_rows_P_col_indices.size(); i++)
+        {
+            halo_rows_P_local_col_indices[i].resize(halo_rows_P_col_indices[i].size());
+        }
+
+        // Update the list of neighbors "P_neighbors" and the corresponding ranges, offsets
+        prep->update_neighbors_list(A, P_neighbors, P_halo_ranges_h, P_halo_ranges, RAP.manager->part_offsets_h, RAP.manager->part_offsets, halo_rows_P_row_offsets, halo_rows_P_col_indices);
+        std::vector<IVector> dummy_boundary_list(0);
+        int current_num_rings = 1;
+        halo_rows_P_local_col_indices.resize(halo_rows_P_col_indices.size());
+        // Convert the global indices in the rows just received to local indices
+        // This function updates halo offsets, halo_rows_P_local_col_indices, local_to_global_map
+        // This should not modify the existing P manager
+        prep->compute_local_halo_indices( P.row_offsets, P.col_indices, halo_rows_P_row_offsets, halo_rows_P_col_indices, halo_rows_P_local_col_indices, RAP.manager->local_to_global_map,  dummy_boundary_list, P_neighbors, P_halo_ranges_h, P_halo_ranges, P_halo_offsets, RAP.manager->part_offsets_h[my_rank], num_owned_coarse_pts, P.get_num_rows(), current_num_rings);
+        // Append the new rows to the matrix P
+        P.set_initialized(0);
+        prep->append_halo_rows(P, halo_rows_P_row_offsets, halo_rows_P_local_col_indices, halo_rows_P_values);
+        P.set_initialized(1);
+    #endif
+
     cudaCheckError();
     // At this point, we can compute RAP_full which contains some rows that will need to be sent to neighbors
     // i.e. RAP_full = [ RAP_int ]
@@ -566,6 +613,8 @@ void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
         this->getNextLevel(typename Matrix<TConfig_d>::memory_space())->getA().getOffsetAndSizeForView(FULL, &offset, &size);
         this->m_next_level_size = size * this->getNextLevel(typename Matrix<TConfig_d>::memory_space() )->getA().get_block_dimy();
     }
+
+    printf("FLATTERNED COMPLETE\n");
 }
 
 template <class T_Config>
@@ -573,7 +622,6 @@ void Classical_AMG_Level_Base<T_Config>::createCoarseMatrices()
 {
     if (this->A->is_matrix_distributed() && this->A->manager->get_num_partitions() > 1)
     {
-        printf("FLATTERNED\n");
         createCoarseMatricesFlattened();
     }
     else
