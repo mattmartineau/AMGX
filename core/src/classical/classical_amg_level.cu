@@ -324,7 +324,7 @@ __global__ void export_matrix_elements_global_flat(INDEX_TYPE *row_offsets, T *v
     }
 }
 
-__global__ void write_matrix_rowsize(INDEX_TYPE *maps, INDEX_TYPE *row_offsets, INDEX_TYPE size, INDEX_TYPE *output)
+__global__ void write_matrix_rowsize_flat(INDEX_TYPE *maps, INDEX_TYPE *row_offsets, INDEX_TYPE size, INDEX_TYPE *output)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -333,6 +333,41 @@ __global__ void write_matrix_rowsize(INDEX_TYPE *maps, INDEX_TYPE *row_offsets, 
         int row = maps[idx];
         output[idx] = row_offsets[row + 1] - row_offsets[row];
         idx += gridDim.x * blockDim.x;
+    }
+}
+
+template <int coop>
+__global__ void calc_num_neighbors_v2_global_flat(INDEX_TYPE *row_offsets, int64_t *col_indices, int64_t *part_offsets, INDEX_TYPE *exists, INDEX_TYPE num_part, INDEX_TYPE my_id, INDEX_TYPE num_rows)
+{
+    int row = blockIdx.x * blockDim.x / coop + threadIdx.x / coop;
+    int coopIdx = threadIdx.x % coop;
+    int64_t start = part_offsets[my_id];
+    int64_t end = part_offsets[my_id + 1];
+
+    while (row < num_rows)
+    {
+        for (int i = row_offsets[row] + coopIdx; i < row_offsets[row + 1]; i += coop)
+        {
+            int64_t col = col_indices[i];
+
+            // Check if column point to halo node
+            if (col < start || col >= end)
+            {
+                int part = 0;
+
+                while (part < num_part && (col < part_offsets[part] || col >= part_offsets[part + 1]))
+                {
+                    part++;
+                }
+
+                if (part < num_part && (col >= part_offsets[part] && col < part_offsets[part + 1]))
+                {
+                    exists[part] = 1;
+                }
+            }
+        }
+
+        row += gridDim.x * blockDim.x / coop;
     }
 }
 
@@ -416,6 +451,7 @@ void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
     RAP.manager->set_base_index(RAP.manager->part_offsets_h[my_rank]);
     RAP.manager->set_index_range(num_owned_coarse_pts);
     RAP.manager->num_rows_global = RAP.manager->part_offsets_h[num_parts];
+
     // --------------------------------------------------------------------
     // Using the B2L_maps of matrix A, identify the rows of P that need to be sent to neighbors,
     // so that they can compute A*P
@@ -471,7 +507,7 @@ void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
             {
                 //matrix_halo_sizes.resize(size+1);
                 int num_blocks = min(4096, (size + 127) / 128);
-                write_matrix_rowsize <<< num_blocks, 128>>>(A.manager->B2L_maps[i].raw(), P.row_offsets.raw(), size, matrix_halo_sizes.raw());
+                write_matrix_rowsize_flat <<< num_blocks, 128>>>(A.manager->B2L_maps[i].raw(), P.row_offsets.raw(), size, matrix_halo_sizes.raw());
                 thrust_wrapper::exclusive_scan(matrix_halo_sizes.begin(), matrix_halo_sizes.begin() + size + 1, matrix_halo_sizes.begin());
                 int nnz_count =  matrix_halo_sizes[size];
                 // Resize export halo matrix, and copy over the rows
@@ -503,14 +539,268 @@ void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
         }
 
         // Update the list of neighbors "P_neighbors" and the corresponding ranges, offsets
-        prep->update_neighbors_list(A, P_neighbors, P_halo_ranges_h, P_halo_ranges, RAP.manager->part_offsets_h, RAP.manager->part_offsets, halo_rows_P_row_offsets, halo_rows_P_col_indices);
+        //update_neighbors_list(&A, &neighbors, &halo_ranges_h, &halo_ranges, &part_offsets_h, &part_offsets, &halo_rows_row_offsets, &halo_rows_col_indices)
+        //prep->update_neighbors_list(A, P_neighbors, P_halo_ranges_h, P_halo_ranges, RAP.manager->part_offsets_h, RAP.manager->part_offsets, halo_rows_P_row_offsets, halo_rows_P_col_indices);
+        int num_partitions = A.manager->get_num_partitions();
+        int my_id = A.manager->global_id();
+        int total_halo_rows = 0;
+        int total_halo_nnz = 0;
+        IVector neighbor_flags(num_partitions, 0);
+
+        for (int i = 0; i < halo_rows_P_row_offsets.size(); i++)
+        {
+            int num_halo_rows = halo_rows_P_row_offsets[i].size() - 1;
+
+            if (num_halo_rows > 0)
+            {
+                total_halo_rows += num_halo_rows;
+                total_halo_nnz += halo_rows_P_row_offsets[i][num_halo_rows];
+                int num_blocks = min(4096, (num_halo_rows + 127) / 128);
+                calc_num_neighbors_v2_global_flat<16> <<< num_blocks, 128>>>(halo_rows_P_row_offsets[i].raw(), halo_rows_P_col_indices[i].raw(),
+                        RAP.manager->part_offsets.raw(), neighbor_flags.raw(), num_partitions, my_id, num_halo_rows);
+            }
+        }
+
+        cudaCheckError();
+        IVector_h neighbor_flags_h = neighbor_flags;
+
+        // unset 1-ring neighbors & myself
+        for (int i = 0; i < num_neighbors; i++)
+        {
+            neighbor_flags_h[P_neighbors[i]] = 0;
+        }
+
+        neighbor_flags_h[my_id] = 0;
+        // this will update neighbor list and halo ranges, note that we don't change 1-ring neighbors order
+        //prep->append_neighbors(A, P_neighbors, P_halo_ranges_h, P_halo_ranges, neighbor_flags_h, RAP.manager->part_offsets_h);
+        // append_neighbors(&A, &neighbors, &halo_ranges_h, &halo_ranges, &neighbor_flags, &part_offsets_h)
+
+        // This function creates arrays neighbors, halo_ranges_h and halo_ranges
+        // base on neighbor_flags
+        // Here do an MPI_allgather to figure out which partitions need data from me
+        // This is required for non-symmetric matrices
+        int num_part = A.manager->get_num_partitions();
+        // pack 0/1 array into array of integers (size/32)
+        int packed_size = (num_part + 32 - 1) / 32;
+        IVector_h packed_nf(packed_size, 0);
+
+        for (int i = 0; i < num_part; i++)
+        {
+            int packed_pos = i / 32;
+            int bit_pos = i % 32;
+            packed_nf[packed_pos] += (neighbor_flags[i] << bit_pos);
+        }
+
+        // exchange packed neighbor flags
+        IVector_h gathered_packed_nf;
+        A.manager->getComms()->all_gather_v(packed_nf, gathered_packed_nf, num_part);
+        // assign neighbors that have edges to me
+        int my_id_pos = my_id / 32;
+        int my_id_bit = my_id % 32;
+
+        for (int i = 0; i < num_part; i++)
+            if (gathered_packed_nf[i * packed_size + my_id_pos] & (1 << my_id_bit)) // check my bit
+            {
+                neighbor_flags[i] = 1;
+            }
+
+        // compute total number of new neighbors
+        int new_neighbors = thrust::reduce(neighbor_flags.begin(), neighbor_flags.end());
+        cudaCheckError();
+        // save old size
+        int old_neighbors = P_neighbors.size();
+        P_neighbors.resize(old_neighbors + new_neighbors);
+        P_halo_ranges_h.resize(old_neighbors * 2 + new_neighbors * 2);
+        // initialize manager->neighbors and manager->halo_ranges_h for the new nodes
+        int active_part = old_neighbors;
+
+
+
+
+
+        // XXX NOT SURE WHAT THIS IS DOING
+        //prep->num_part = num_part;
+
+
+
+
+
+        for (int i = 0; i < num_part; i++)
+        {
+            if (neighbor_flags[i] > 0)
+            {
+                P_neighbors[active_part] = i;
+                P_halo_ranges_h[2 * active_part] = RAP.manager->part_offsets_h[i];
+                P_halo_ranges_h[2 * active_part + 1] = RAP.manager->part_offsets_h[i + 1];
+                active_part++;
+            }
+        }
+
+        P_halo_ranges.resize(old_neighbors * 2 + new_neighbors * 2);
+        thrust::copy(P_halo_ranges_h.begin() + old_neighbors * 2, P_halo_ranges_h.end(), P_halo_ranges.begin() + old_neighbors * 2);
+        cudaCheckError();
+
         std::vector<IVector> dummy_boundary_list(0);
         int current_num_rings = 1;
         halo_rows_P_local_col_indices.resize(halo_rows_P_col_indices.size());
         // Convert the global indices in the rows just received to local indices
         // This function updates halo offsets, halo_rows_P_local_col_indices, local_to_global_map
         // This should not modify the existing P manager
-        prep->compute_local_halo_indices( P.row_offsets, P.col_indices, halo_rows_P_row_offsets, halo_rows_P_col_indices, halo_rows_P_local_col_indices, RAP.manager->local_to_global_map,  dummy_boundary_list, P_neighbors, P_halo_ranges_h, P_halo_ranges, P_halo_offsets, coarse_base_index, num_owned_coarse_pts, P.get_num_rows(), current_num_rings);
+        //prep->compute_local_halo_indices( P.row_offsets, P.col_indices, halo_rows_P_row_offsets, halo_rows_P_col_indices, halo_rows_P_local_col_indices, RAP.manager->local_to_global_map,  dummy_boundary_list, P_neighbors, P_halo_ranges_h, P_halo_ranges, P_halo_offsets, coarse_base_index, num_owned_coarse_pts, P.get_num_rows(), current_num_rings);
+
+    // This function checks the halo_col_indices received from the neighbors, and identifies
+    // new halo_indices and  updates halo_offsets, local_to_global_map accordingly
+    // input: halo row offsets,
+    //        halo global column indices
+    //        current local to global map
+    //        neighbors (new discovered neighbors should already be included)
+    //        halo_ranges for the neighbors
+    //
+    // output: halo offsets,
+    //         halo local column indices,
+    //         updated local to global map (in place)
+    int size = A_num_rows;
+    //TODO: Are these the optimal block_sizes?
+    int num_blocks = min(4096, (size + 127) / 128);
+    int num_neighbors = neighbors.size();
+    // compute neighbor offsets & total number of neighbor rows
+    int total_rows_of_neighbors = 0;
+    std::vector<int> neighbor_offsets_h(num_neighbors + 1, 0);
+    int max_neighbor_size = 0;
+
+    for (int i = 0; i < num_neighbors; i ++)
+    {
+        total_rows_of_neighbors += halo_ranges_h[2 * i + 1] - halo_ranges_h[2 * i];
+        neighbor_offsets_h[i + 1] = neighbor_offsets_h[i] + halo_ranges_h[2 * i + 1] - halo_ranges_h[2 * i];
+        max_neighbor_size = max_neighbor_size > (halo_ranges_h[2 * i + 1] - halo_ranges_h[2 * i]) ? max_neighbor_size : (halo_ranges_h[2 * i + 1] - halo_ranges_h[2 * i]);
+    }
+
+    // copy offsets to device
+    IVector neighbor_offsets(num_neighbors + 1);
+    thrust::copy(neighbor_offsets_h.begin(), neighbor_offsets_h.end(), neighbor_offsets.begin());
+    // store flags for all neighbor nodes
+    IVector neighbor_nodes(total_rows_of_neighbors);
+    // flag neighbor nodes that are in the existing rings as -(local_index)-1
+    thrust::fill(neighbor_nodes.begin(), neighbor_nodes.end(), 0);
+    cudaCheckError();
+    int local_to_global_size = local_to_global.size();
+    int num_blocks2 = min(4096, (local_to_global_size + 127) / 128);
+
+    if (local_to_global_size != 0)
+    {
+        flag_halo_nodes_local_v2 <<< num_blocks2, 128>>>(halo_ranges.raw(), neighbor_nodes.raw(), neighbor_offsets.raw(), base_index, index_range, num_neighbors, local_to_global_size, local_to_global.raw());
+        cudaCheckError();
+    }
+
+    // 1) flag NEW neighbors nodes that I need as 1, they will be in the 2nd ring
+    // 2) fill out local indices for 1st ring & internal indices
+    int num_halos = halo_row_offsets.size();
+
+    for (int i = 0; i < num_halos; i++)
+    {
+        int size = halo_global_indices[i].size();
+
+        if (size > 0)
+        {
+            halo_local_indices[i].resize(size);
+            thrust::fill(halo_local_indices[i].begin(), halo_local_indices[i].end(), -1); // fill with -1
+            // TODO: launch only on halo rows
+            flag_halo_nodes_global<16, 1> <<< num_blocks, 128>>>(halo_row_offsets[i].raw(), halo_row_offsets[i].size() - 1, halo_global_indices[i].raw(), halo_ranges.raw(), neighbor_nodes.raw(), neighbor_offsets.raw(), base_index, index_range, num_neighbors, halo_local_indices[i].raw());
+        }
+    }
+
+    cudaCheckError();
+    // replace all negative values with 0 in neighbor flags
+    is_less_than_zero pred;
+    thrust::replace_if(neighbor_nodes.begin(), neighbor_nodes.end(), pred, 0);
+    cudaCheckError();
+    // fill halo offsets for the current number of  ring for new neighbors (it will be of size 0)
+    int current_num_neighbors = (halo_offsets.size() - 1) / current_num_rings;;
+    int num_rings = current_num_rings + 1;
+    IVector_h new_halo_offsets(num_rings * num_neighbors + 1);
+
+    for (int j = 0; j < current_num_rings; j++)
+    {
+        for (int i = 0 ; i <= current_num_neighbors; i++)
+        {
+            new_halo_offsets[num_neighbors * j + i] = halo_offsets[current_num_neighbors * j + i];
+        }
+
+        for (int i = current_num_neighbors; i < num_neighbors; i++)
+        {
+            new_halo_offsets[num_neighbors * j + i + 1] = new_halo_offsets[num_neighbors * j + i];
+        }
+    }
+
+    halo_offsets = new_halo_offsets;
+    int ring = current_num_rings;
+    int current_num_halo_indices = local_to_global.size();
+    //int halo_base = index_range + current_num_halo_indices;
+    cudaCheckError();
+
+    // compute neighbors nodes indices (in-place) for each neighbor
+    for (int i = 0; i < num_neighbors; i++)
+    {
+        int last_node, num_halo;
+
+        if (neighbor_offsets_h[i + 1] != neighbor_offsets_h[i])
+        {
+            last_node = neighbor_nodes[neighbor_offsets_h[i + 1] - 1];
+            thrust_wrapper::exclusive_scan(neighbor_nodes.begin() + neighbor_offsets_h[i], neighbor_nodes.begin() + neighbor_offsets_h[i + 1], neighbor_nodes.begin() + neighbor_offsets_h[i]);
+            num_halo = neighbor_nodes[neighbor_offsets_h[i + 1] - 1] + last_node;
+        }
+        else
+        {
+            num_halo = 0;
+            last_node = 0;
+        }
+
+        // update halo offsets (L2H)
+        halo_offsets[ring * num_neighbors + i + 1] = halo_offsets[ring * num_neighbors + i] + num_halo;
+
+        // if size = 0 then we don't need to compute it
+        if (boundary_lists.size() > 0)
+        {
+            // create my boundary lists = list of neighbor inner nodes corresponding to halo numbers 0..M
+            // basically this will be our 2-ring B2L_maps
+            boundary_lists[i].resize(num_halo);
+            int size = neighbor_offsets_h[i + 1] - neighbor_offsets_h[i];
+            num_blocks = min(4096, (size + 127) / 128);
+
+            if (size > 0)
+            {
+                populate_B2L <<< num_blocks, 128>>>(neighbor_nodes.raw() + neighbor_offsets_h[i], boundary_lists[i].raw(), last_node, size);
+                cudaCheckError();
+            }
+        }
+    }
+
+    cudaCheckError();
+    // compute local indices and new local to global mapping
+    int new_num_halo_indices = halo_offsets[num_rings * num_neighbors] - halo_offsets[current_num_rings * num_neighbors];
+    local_to_global.resize(current_num_halo_indices + new_num_halo_indices);
+    IVector halo_offsets_d(halo_offsets.size());
+    thrust::copy(halo_offsets.begin(), halo_offsets.end(), halo_offsets_d.begin());
+    cudaCheckError();
+
+    // do this for all ring-1 neighbors
+    for (int i = 0; i < num_halos; i++)
+    {
+        int num_neighbor_rows = halo_row_offsets[i].size() - 1;
+        num_blocks = min(4096, (num_neighbor_rows + 127) / 128);
+
+        if (num_blocks > 0)
+        {
+            calc_new_halo_mapping_ring2<16> <<< num_blocks, 128>>>(
+                halo_row_offsets[i].raw(), num_neighbor_rows, halo_global_indices[i].raw(),                     // halo rows to process
+                halo_ranges.raw(), base_index, index_range, num_neighbors,                          // ranges and # of neighbors
+                halo_offsets_d.raw() + current_num_rings * num_neighbors, neighbor_offsets.raw(), neighbor_nodes.raw(),     // halo offsets, neighbor offsets and indices
+                local_to_global.raw(), halo_local_indices[i].raw());                                    // output
+        }
+    }
+
+    cudaCheckError();
+
         // Append the new rows to the matrix P
         P.set_initialized(0);
         prep->append_halo_rows(P, halo_rows_P_row_offsets, halo_rows_P_local_col_indices, halo_rows_P_values);
