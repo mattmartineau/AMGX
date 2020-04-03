@@ -413,7 +413,7 @@ template <typename TConfig> class DistributedManagerBase
 
         void initializeUploadReorderAll(int n, int nnz, int block_dimx, int block_dimy, const int *row_ptrs, const int *col_indices, const void *data, const void *diag_data, Matrix<TConfig> &A);
 
-        // create comms + initialize basic internal variables 
+        // create comms + initialize basic internal variables
         void initComms(Resources *rsrc);
 
         void createComms(Resources *rsrc);
@@ -1350,7 +1350,7 @@ template <typename TConfig> class DistributedManagerBase
             }
         }
 
-    protected:
+    public:
 
         //template<CommType> friend void DistributedManager<TConfig>::copy(const CommType&);
         friend class energymin::Energymin_AMG_Level_Base<TConfig>;
@@ -2072,11 +2072,11 @@ class DistributedManager< TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_in
             const int *row_offsets, const mat_value_type *values, const void *diag);
 
         template <typename t_colIndex>
-        void loadDistributedMatrixPartitionVec(int num_rows, int num_nonzeros, const int block_dimx, const int block_dimy, 
+        void loadDistributedMatrixPartitionVec(int num_rows, int num_nonzeros, const int block_dimx, const int block_dimy,
             const int *row_offsets, const t_colIndex *col_indices, const mat_value_type *values, int num_ranks, int num_rows_global, const void *diag, const int *partition);
 
         template <typename t_colIndex>
-        void loadDistributedMatrixPartitionOffsets( int num_rows, int num_nonzeros, const int block_dimx, const int block_dimy, 
+        void loadDistributedMatrixPartitionOffsets( int num_rows, int num_nonzeros, const int block_dimx, const int block_dimy,
             const int *row_offsets, const t_colIndex *col_indices, const mat_value_type *values, int num_ranks, int num_rows_global, const void *diag, const t_colIndex *partition_offsets);
 };
 }

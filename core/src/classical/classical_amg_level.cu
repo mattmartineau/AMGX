@@ -283,6 +283,59 @@ void Classical_AMG_Level<TemplateConfig<AMGX_host, t_vecPrec, t_matPrec, t_indPr
 {
 }
 
+template <int coop, class T>
+__global__ void export_matrix_elements_global_flat(INDEX_TYPE *row_offsets, T *values, INDEX_TYPE bsize, INDEX_TYPE *maps, INDEX_TYPE *pointers, T *output, INDEX_TYPE *col_indices, int64_t *output2, INDEX_TYPE size, int64_t *local_to_global, INDEX_TYPE *q, INDEX_TYPE num_owned_pts, int64_t base_index)
+{
+    int idx = blockIdx.x * blockDim.x / coop + threadIdx.x / coop;
+    int coopIdx = threadIdx.x % coop;
+
+    while (idx < size)
+    {
+        int row = maps[idx];
+
+        if (q != NULL)
+        {
+            row = q[row];
+        }
+
+        INDEX_TYPE src_base = row_offsets[row];
+        INDEX_TYPE dst_base = pointers[idx];
+
+        for (int m = coopIdx; m < row_offsets[row + 1]*bsize - src_base * bsize; m += coop)
+        {
+            output[dst_base * bsize + m] = values[src_base * bsize + m];
+        }
+
+        for (int m = coopIdx; m < row_offsets[row + 1] - src_base; m += coop)
+        {
+            int col = col_indices[src_base + m];
+
+            if (col < num_owned_pts)
+            {
+                output2[dst_base + m] = (int64_t) col_indices[src_base + m] + base_index;
+            }
+            else
+            {
+                output2[dst_base + m] = local_to_global[col_indices[src_base + m] - num_owned_pts];
+            }
+        }
+
+        idx += gridDim.x * blockDim.x / coop;
+    }
+}
+
+__global__ void write_matrix_rowsize(INDEX_TYPE *maps, INDEX_TYPE *row_offsets, INDEX_TYPE size, INDEX_TYPE *output)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    while (idx < size)
+    {
+        int row = maps[idx];
+        output[idx] = row_offsets[row + 1] - row_offsets[row];
+        idx += gridDim.x * blockDim.x;
+    }
+}
+
 template <AMGX_VecPrecision t_vecPrec, AMGX_MatPrecision t_matPrec, AMGX_IndPrecision t_indPrec>
 void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indPrec> >::createCoarseMatricesFlattened()
 {
@@ -379,6 +432,7 @@ void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
     #if 0
         prep->exchange_halo_rows_P(A, P, RAP.manager->local_to_global_map, P_neighbors, P_halo_ranges_h, P_halo_ranges, P_halo_offsets, RAP.manager->part_offsets_h, RAP.manager->part_offsets, num_owned_coarse_pts, RAP.manager->part_offsets_h[my_rank]);
     #else
+        int coarse_base_index = RAP.manager->part_offsets_h[my_rank];
         if (P.hasProps(DIAG) || P.get_block_size() != 1)
         {
             FatalError("P with external diagonal or block_size != 1 not supported", AMGX_ERR_NOT_IMPLEMENTED);
@@ -393,9 +447,49 @@ void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
         // In this function, store in halo_rows_P_row_offsets, halo_rows_P_col_indices and halo_rows_P_values, the rows of P that need to be sent to each neighbors
         // halo_rows_P_col_indices stores global indices
 
-        //prep->exchange_halo_rows_P(A, P, RAP.manager->local_to_global_map, P_neighbors, P_halo_ranges_h, P_halo_ranges, P_halo_offsets, RAP.manager->part_offsets_h, RAP.manager->part_offsets, num_owned_coarse_pts, RAP.manager->part_offsets_h[my_rank]);
-        //exchange_halo_rows_P(&A, &P, I64Vector &RAP_local_to_global_map, IVector_h &P_neighbors, I64Vector_h &P_halo_ranges_h, I64Vector &P_halo_ranges, IVector_h &P_halo_offsets, I64Vector_h &RAP_part_offsets_h, I64Vector &RAP_part_offsets, index_type num_owned_coarse_pts, int64_t coarse_base_index)
-        prep->pack_halo_rows_P(A, P, halo_rows_P_row_offsets, halo_rows_P_col_indices, halo_rows_P_values, RAP.manager->local_to_global_map, num_owned_coarse_pts, RAP.manager->part_offsets_h[my_rank]);
+        halo_rows_P_row_offsets.resize(num_neighbors);
+        halo_rows_P_col_indices.resize(num_neighbors);
+        halo_rows_P_values.resize(num_neighbors);
+        int num_rings_to_send = 1;
+        //Scratch space computation
+        int max_size = 0;
+
+        for (int i = 0; i < num_neighbors; i++)
+        {
+            max_size = max_size > A.manager->B2L_rings[i][num_rings_to_send] ? max_size : A.manager->B2L_rings[i][num_rings_to_send];
+        }
+
+        IVector matrix_halo_sizes(max_size + 1);
+
+        // Here only using the 1-ring of matrix A
+        for (int i = 0; i < num_neighbors; i++)
+        {
+            // Write the length of the rows in the order of B2L_maps, then calculate row_offsets
+            int size = A.manager->B2L_rings[i][num_rings_to_send];
+
+            if (size != 0)
+            {
+                //matrix_halo_sizes.resize(size+1);
+                int num_blocks = min(4096, (size + 127) / 128);
+                write_matrix_rowsize <<< num_blocks, 128>>>(A.manager->B2L_maps[i].raw(), P.row_offsets.raw(), size, matrix_halo_sizes.raw());
+                thrust_wrapper::exclusive_scan(matrix_halo_sizes.begin(), matrix_halo_sizes.begin() + size + 1, matrix_halo_sizes.begin());
+                int nnz_count =  matrix_halo_sizes[size];
+                // Resize export halo matrix, and copy over the rows
+                halo_rows_P_row_offsets[i].resize(size + 1);
+                halo_rows_P_col_indices[i].resize(nnz_count);
+                halo_rows_P_values[i].resize(nnz_count);
+                /* WARNING: Since A is reordered (into interior and boundary nodes), while R and P are not reordered,
+                            you must unreorder A when performing R*A*P product in ordre to obtain the correct result. */
+                export_matrix_elements_global_flat<32> <<< num_blocks, 128>>>(P.row_offsets.raw(), P.values.raw(), P.get_block_size(), A.manager->B2L_maps[i].raw(), matrix_halo_sizes.raw(), halo_rows_P_values[i].raw(), P.col_indices.raw(), halo_rows_P_col_indices[i].raw(), size, RAP.manager->local_to_global_map.raw(), NULL /*A.manager->inverse_renumbering.raw()*/, num_owned_coarse_pts, coarse_base_index);
+                thrust::copy(matrix_halo_sizes.begin(), matrix_halo_sizes.begin() + size + 1, halo_rows_P_row_offsets[i].begin());
+            }
+            else
+            {
+                halo_rows_P_row_offsets[i].resize(0);
+                halo_rows_P_col_indices[i].resize(0);
+                halo_rows_P_values[i].resize(0);
+            }
+        }
 
         // Do the exchange with the neighbors
         // On return, halo_rows_P_rows_offsets, halo_rows_P_col_indices and halo_rows_P_values stores the rows of P received from each neighbor (rows needed to perform A*P)
@@ -416,7 +510,7 @@ void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
         // Convert the global indices in the rows just received to local indices
         // This function updates halo offsets, halo_rows_P_local_col_indices, local_to_global_map
         // This should not modify the existing P manager
-        prep->compute_local_halo_indices( P.row_offsets, P.col_indices, halo_rows_P_row_offsets, halo_rows_P_col_indices, halo_rows_P_local_col_indices, RAP.manager->local_to_global_map,  dummy_boundary_list, P_neighbors, P_halo_ranges_h, P_halo_ranges, P_halo_offsets, RAP.manager->part_offsets_h[my_rank], num_owned_coarse_pts, P.get_num_rows(), current_num_rings);
+        prep->compute_local_halo_indices( P.row_offsets, P.col_indices, halo_rows_P_row_offsets, halo_rows_P_col_indices, halo_rows_P_local_col_indices, RAP.manager->local_to_global_map,  dummy_boundary_list, P_neighbors, P_halo_ranges_h, P_halo_ranges, P_halo_offsets, coarse_base_index, num_owned_coarse_pts, P.get_num_rows(), current_num_rings);
         // Append the new rows to the matrix P
         P.set_initialized(0);
         prep->append_halo_rows(P, halo_rows_P_row_offsets, halo_rows_P_local_col_indices, halo_rows_P_values);
