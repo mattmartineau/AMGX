@@ -278,729 +278,6 @@ void Classical_AMG_Level_Base<T_Config>::createCoarseVertices()
     markCoarseFinePoints();
 }
 
-template <AMGX_VecPrecision t_vecPrec, AMGX_MatPrecision t_matPrec, AMGX_IndPrecision t_indPrec>
-void Classical_AMG_Level<TemplateConfig<AMGX_host, t_vecPrec, t_matPrec, t_indPrec> >::createCoarseMatricesFlattened()
-{
-}
-
-template <int coop, class T>
-__global__ void export_matrix_elements_global_flat(INDEX_TYPE *row_offsets, T *values, INDEX_TYPE bsize, INDEX_TYPE *maps, INDEX_TYPE *pointers, T *output, INDEX_TYPE *col_indices, int64_t *output2, INDEX_TYPE size, int64_t *local_to_global, INDEX_TYPE *q, INDEX_TYPE num_owned_pts, int64_t base_index)
-{
-    int idx = blockIdx.x * blockDim.x / coop + threadIdx.x / coop;
-    int coopIdx = threadIdx.x % coop;
-
-    while (idx < size)
-    {
-        int row = maps[idx];
-
-        if (q != NULL)
-        {
-            row = q[row];
-        }
-
-        INDEX_TYPE src_base = row_offsets[row];
-        INDEX_TYPE dst_base = pointers[idx];
-
-        for (int m = coopIdx; m < row_offsets[row + 1]*bsize - src_base * bsize; m += coop)
-        {
-            output[dst_base * bsize + m] = values[src_base * bsize + m];
-        }
-
-        for (int m = coopIdx; m < row_offsets[row + 1] - src_base; m += coop)
-        {
-            int col = col_indices[src_base + m];
-
-            if (col < num_owned_pts)
-            {
-                output2[dst_base + m] = (int64_t) col_indices[src_base + m] + base_index;
-            }
-            else
-            {
-                output2[dst_base + m] = local_to_global[col_indices[src_base + m] - num_owned_pts];
-            }
-        }
-
-        idx += gridDim.x * blockDim.x / coop;
-    }
-}
-
-__global__ void write_matrix_rowsize_flat(INDEX_TYPE *maps, INDEX_TYPE *row_offsets, INDEX_TYPE size, INDEX_TYPE *output)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    while (idx < size)
-    {
-        int row = maps[idx];
-        output[idx] = row_offsets[row + 1] - row_offsets[row];
-        idx += gridDim.x * blockDim.x;
-    }
-}
-
-template <int coop>
-__global__ void calc_num_neighbors_v2_global_flat(INDEX_TYPE *row_offsets, int64_t *col_indices, int64_t *part_offsets, INDEX_TYPE *exists, INDEX_TYPE num_part, INDEX_TYPE my_id, INDEX_TYPE num_rows)
-{
-    int row = blockIdx.x * blockDim.x / coop + threadIdx.x / coop;
-    int coopIdx = threadIdx.x % coop;
-    int64_t start = part_offsets[my_id];
-    int64_t end = part_offsets[my_id + 1];
-
-    while (row < num_rows)
-    {
-        for (int i = row_offsets[row] + coopIdx; i < row_offsets[row + 1]; i += coop)
-        {
-            int64_t col = col_indices[i];
-
-            // Check if column point to halo node
-            if (col < start || col >= end)
-            {
-                int part = 0;
-
-                while (part < num_part && (col < part_offsets[part] || col >= part_offsets[part + 1]))
-                {
-                    part++;
-                }
-
-                if (part < num_part && (col >= part_offsets[part] && col < part_offsets[part + 1]))
-                {
-                    exists[part] = 1;
-                }
-            }
-        }
-
-        row += gridDim.x * blockDim.x / coop;
-    }
-}
-
-template <AMGX_VecPrecision t_vecPrec, AMGX_MatPrecision t_matPrec, AMGX_IndPrecision t_indPrec>
-void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indPrec> >::createCoarseMatricesFlattened()
-{
-    Matrix<TConfig_d> &RAP = this->getNextLevel( typename Matrix<TConfig_d>::memory_space( ) )->getA( );
-    Matrix<TConfig_d> &A = this->getA();
-    Matrix<TConfig_d> &P = this->P;
-
-    #if 0
-    // allocate aggressive interpolator if needed
-    if (AMG_Level<TConfig_d>::getLevelIndex() < this->num_aggressive_levels)
-    {
-        if (this->interpolator) { delete this->interpolator; }
-
-        this->interpolator = chooseAggressiveInterpolator<TConfig_d>(AMG_Level<TConfig_d>::amg->m_cfg, AMG_Level<TConfig_d>::amg->m_cfg_scope);
-    }
-    #endif
-
-    /* WARNING: exit if D1 interpolator is selected in distributed setting */
-    std::string s("");
-    s += AMG_Level<TConfig_d>::amg->m_cfg->AMG_Config::getParameter<std::string>("interpolator", AMG_Level<TConfig_d>::amg->m_cfg_scope);
-
-    if (A.is_matrix_distributed() && (s.compare("D1") == 0))
-    {
-        FatalError("D1 interpolation is not supported in distributed settings", AMGX_ERR_NOT_IMPLEMENTED);
-    }
-
-    /* WARNING: do not recompute prolongation (P) and restriction (R) when you
-                are reusing the level structure (structure_reuse_levels > 0) */
-    if (this->isReuseLevel() == false)
-    {
-        //generate the interpolation matrix
-        this->interpolator->generateInterpolationMatrix(A, this->m_cf_map, this->m_s_con, this->m_scratch, P, AMG_Level<TConfig_d>::amg);
-
-        this->m_cf_map.clear();
-        this->m_cf_map.shrink_to_fit();
-        this->m_scratch.clear();
-        this->m_scratch.shrink_to_fit();
-        this->m_s_con.clear();
-        this->m_s_con.shrink_to_fit();
-
-        // truncate based on max # of elements if desired
-        if (this->max_elmts > 0 && P.get_num_rows() > 0)
-        {
-            Truncate<TConfig_d>::truncateByMaxElements(P, this->max_elmts);
-        }
-
-        if (this->m_min_rows_latency_hiding < 0 || P.get_num_rows() < this->m_min_rows_latency_hiding)
-        {
-            // This will cause bsrmv_with_mask to not do latency hiding
-            P.setInteriorView(OWNED);
-            P.setExteriorView(OWNED);
-        }
-    }
-
-    RAP.addProps(CSR);
-    RAP.set_block_dimx(this->getA().get_block_dimx());
-    RAP.set_block_dimy(this->getA().get_block_dimy());
-    IndexType num_parts = A.manager->get_num_partitions();
-    IndexType num_neighbors = A.manager->num_neighbors();
-    IndexType my_rank = A.manager->global_id();
-    // OWNED includes interior and boundary
-    A.setView(OWNED);
-    int num_owned_coarse_pts = P.manager->halo_offsets[0];
-    int num_owned_fine_pts = A.manager->halo_offsets[0];
-
-    // Initialize RAP.manager
-    if (RAP.manager == NULL)
-    {
-        RAP.manager = new DistributedManager<TConfig_d>();
-    }
-
-    RAP.manager->A = &RAP;
-    RAP.manager->setComms(A.manager->getComms());
-    RAP.manager->set_global_id(my_rank);
-    RAP.manager->set_num_partitions(num_parts);
-    RAP.manager->part_offsets_h = P.manager->part_offsets_h;
-    RAP.manager->part_offsets = P.manager->part_offsets;
-    RAP.manager->set_base_index(RAP.manager->part_offsets_h[my_rank]);
-    RAP.manager->set_index_range(num_owned_coarse_pts);
-    RAP.manager->num_rows_global = RAP.manager->part_offsets_h[num_parts];
-
-    // --------------------------------------------------------------------
-    // Using the B2L_maps of matrix A, identify the rows of P that need to be sent to neighbors,
-    // so that they can compute A*P
-    // Once rows of P are identified, convert the column indices to global indices, and send them to neighbors
-    //  ---------------------------------------------------------------------------
-    // Copy some information about the manager of P, since we don't want to modify those
-    IVector_h P_neighbors = P.manager->neighbors;
-    I64Vector_h P_halo_ranges_h = P.manager->halo_ranges_h;
-    I64Vector_d P_halo_ranges = P.manager->halo_ranges;
-    RAP.manager->local_to_global_map = P.manager->local_to_global_map;
-    IVector_h P_halo_offsets = P.manager->halo_offsets;
-    // Create a temporary distributed arranger
-    DistributedArranger<TConfig_d> *prep = new DistributedArranger<TConfig_d>;
-    #if 0
-        prep->exchange_halo_rows_P(A, P, RAP.manager->local_to_global_map, P_neighbors, P_halo_ranges_h, P_halo_ranges, P_halo_offsets, RAP.manager->part_offsets_h, RAP.manager->part_offsets, num_owned_coarse_pts, RAP.manager->part_offsets_h[my_rank]);
-    #else
-        int coarse_base_index = RAP.manager->part_offsets_h[my_rank];
-        if (P.hasProps(DIAG) || P.get_block_size() != 1)
-        {
-            FatalError("P with external diagonal or block_size != 1 not supported", AMGX_ERR_NOT_IMPLEMENTED);
-        }
-
-        typedef typename Matrix<TConfig_d>::MVector MVector;
-        std::vector<IVector> halo_rows_P_row_offsets;
-        std::vector<I64Vector> halo_rows_P_col_indices;
-        std::vector<IVector> halo_rows_P_local_col_indices;
-        std::vector<MVector> halo_rows_P_values;
-
-        // In this function, store in halo_rows_P_row_offsets, halo_rows_P_col_indices and halo_rows_P_values, the rows of P that need to be sent to each neighbors
-        // halo_rows_P_col_indices stores global indices
-
-        halo_rows_P_row_offsets.resize(num_neighbors);
-        halo_rows_P_col_indices.resize(num_neighbors);
-        halo_rows_P_values.resize(num_neighbors);
-        int num_rings_to_send = 1;
-        //Scratch space computation
-        int max_size = 0;
-
-        for (int i = 0; i < num_neighbors; i++)
-        {
-            max_size = max_size > A.manager->B2L_rings[i][num_rings_to_send] ? max_size : A.manager->B2L_rings[i][num_rings_to_send];
-        }
-
-        IVector matrix_halo_sizes(max_size + 1);
-
-        // Here only using the 1-ring of matrix A
-        for (int i = 0; i < num_neighbors; i++)
-        {
-            // Write the length of the rows in the order of B2L_maps, then calculate row_offsets
-            int size = A.manager->B2L_rings[i][num_rings_to_send];
-
-            if (size != 0)
-            {
-                //matrix_halo_sizes.resize(size+1);
-                int num_blocks = min(4096, (size + 127) / 128);
-                write_matrix_rowsize_flat <<< num_blocks, 128>>>(A.manager->B2L_maps[i].raw(), P.row_offsets.raw(), size, matrix_halo_sizes.raw());
-                thrust_wrapper::exclusive_scan(matrix_halo_sizes.begin(), matrix_halo_sizes.begin() + size + 1, matrix_halo_sizes.begin());
-                int nnz_count =  matrix_halo_sizes[size];
-                // Resize export halo matrix, and copy over the rows
-                halo_rows_P_row_offsets[i].resize(size + 1);
-                halo_rows_P_col_indices[i].resize(nnz_count);
-                halo_rows_P_values[i].resize(nnz_count);
-                /* WARNING: Since A is reordered (into interior and boundary nodes), while R and P are not reordered,
-                            you must unreorder A when performing R*A*P product in ordre to obtain the correct result. */
-                export_matrix_elements_global_flat<32> <<< num_blocks, 128>>>(P.row_offsets.raw(), P.values.raw(), P.get_block_size(), A.manager->B2L_maps[i].raw(), matrix_halo_sizes.raw(), halo_rows_P_values[i].raw(), P.col_indices.raw(), halo_rows_P_col_indices[i].raw(), size, RAP.manager->local_to_global_map.raw(), NULL /*A.manager->inverse_renumbering.raw()*/, num_owned_coarse_pts, coarse_base_index);
-                thrust::copy(matrix_halo_sizes.begin(), matrix_halo_sizes.begin() + size + 1, halo_rows_P_row_offsets[i].begin());
-            }
-            else
-            {
-                halo_rows_P_row_offsets[i].resize(0);
-                halo_rows_P_col_indices[i].resize(0);
-                halo_rows_P_values[i].resize(0);
-            }
-        }
-
-        // Do the exchange with the neighbors
-        // On return, halo_rows_P_rows_offsets, halo_rows_P_col_indices and halo_rows_P_values stores the rows of P received from each neighbor (rows needed to perform A*P)
-        std::vector<I64Vector> dummy_halo_ids(0);
-        A.manager->getComms()->exchange_matrix_halo(halo_rows_P_row_offsets, halo_rows_P_col_indices, halo_rows_P_values, dummy_halo_ids, A.manager->neighbors, A.manager->global_id());
-        halo_rows_P_local_col_indices.resize(halo_rows_P_col_indices.size());
-
-        for (int i = 0; i < halo_rows_P_col_indices.size(); i++)
-        {
-            halo_rows_P_local_col_indices[i].resize(halo_rows_P_col_indices[i].size());
-        }
-
-        // Update the list of neighbors "P_neighbors" and the corresponding ranges, offsets
-        //update_neighbors_list(&A, &neighbors, &halo_ranges_h, &halo_ranges, &part_offsets_h, &part_offsets, &halo_rows_row_offsets, &halo_rows_col_indices)
-        //prep->update_neighbors_list(A, P_neighbors, P_halo_ranges_h, P_halo_ranges, RAP.manager->part_offsets_h, RAP.manager->part_offsets, halo_rows_P_row_offsets, halo_rows_P_col_indices);
-        int num_partitions = A.manager->get_num_partitions();
-        int my_id = A.manager->global_id();
-        int total_halo_rows = 0;
-        int total_halo_nnz = 0;
-        IVector neighbor_flags(num_partitions, 0);
-
-        for (int i = 0; i < halo_rows_P_row_offsets.size(); i++)
-        {
-            int num_halo_rows = halo_rows_P_row_offsets[i].size() - 1;
-
-            if (num_halo_rows > 0)
-            {
-                total_halo_rows += num_halo_rows;
-                total_halo_nnz += halo_rows_P_row_offsets[i][num_halo_rows];
-                int num_blocks = min(4096, (num_halo_rows + 127) / 128);
-                calc_num_neighbors_v2_global_flat<16> <<< num_blocks, 128>>>(halo_rows_P_row_offsets[i].raw(), halo_rows_P_col_indices[i].raw(),
-                        RAP.manager->part_offsets.raw(), neighbor_flags.raw(), num_partitions, my_id, num_halo_rows);
-            }
-        }
-
-        cudaCheckError();
-        IVector_h neighbor_flags_h = neighbor_flags;
-
-        // unset 1-ring neighbors & myself
-        for (int i = 0; i < num_neighbors; i++)
-        {
-            neighbor_flags_h[P_neighbors[i]] = 0;
-        }
-
-        neighbor_flags_h[my_id] = 0;
-        // this will update neighbor list and halo ranges, note that we don't change 1-ring neighbors order
-        //prep->append_neighbors(A, P_neighbors, P_halo_ranges_h, P_halo_ranges, neighbor_flags_h, RAP.manager->part_offsets_h);
-        // append_neighbors(&A, &neighbors, &halo_ranges_h, &halo_ranges, &neighbor_flags, &part_offsets_h)
-
-        // This function creates arrays neighbors, halo_ranges_h and halo_ranges
-        // base on neighbor_flags
-        // Here do an MPI_allgather to figure out which partitions need data from me
-        // This is required for non-symmetric matrices
-        int num_part = A.manager->get_num_partitions();
-        // pack 0/1 array into array of integers (size/32)
-        int packed_size = (num_part + 32 - 1) / 32;
-        IVector_h packed_nf(packed_size, 0);
-
-        for (int i = 0; i < num_part; i++)
-        {
-            int packed_pos = i / 32;
-            int bit_pos = i % 32;
-            packed_nf[packed_pos] += (neighbor_flags[i] << bit_pos);
-        }
-
-        // exchange packed neighbor flags
-        IVector_h gathered_packed_nf;
-        A.manager->getComms()->all_gather_v(packed_nf, gathered_packed_nf, num_part);
-        // assign neighbors that have edges to me
-        int my_id_pos = my_id / 32;
-        int my_id_bit = my_id % 32;
-
-        for (int i = 0; i < num_part; i++)
-            if (gathered_packed_nf[i * packed_size + my_id_pos] & (1 << my_id_bit)) // check my bit
-            {
-                neighbor_flags[i] = 1;
-            }
-
-        // compute total number of new neighbors
-        int new_neighbors = thrust::reduce(neighbor_flags.begin(), neighbor_flags.end());
-        cudaCheckError();
-        // save old size
-        int old_neighbors = P_neighbors.size();
-        P_neighbors.resize(old_neighbors + new_neighbors);
-        P_halo_ranges_h.resize(old_neighbors * 2 + new_neighbors * 2);
-        // initialize manager->neighbors and manager->halo_ranges_h for the new nodes
-        int active_part = old_neighbors;
-
-
-
-
-
-        // XXX NOT SURE WHAT THIS IS DOING
-        //prep->num_part = num_part;
-
-
-
-
-
-        for (int i = 0; i < num_part; i++)
-        {
-            if (neighbor_flags[i] > 0)
-            {
-                P_neighbors[active_part] = i;
-                P_halo_ranges_h[2 * active_part] = RAP.manager->part_offsets_h[i];
-                P_halo_ranges_h[2 * active_part + 1] = RAP.manager->part_offsets_h[i + 1];
-                active_part++;
-            }
-        }
-
-        P_halo_ranges.resize(old_neighbors * 2 + new_neighbors * 2);
-        thrust::copy(P_halo_ranges_h.begin() + old_neighbors * 2, P_halo_ranges_h.end(), P_halo_ranges.begin() + old_neighbors * 2);
-        cudaCheckError();
-
-        std::vector<IVector> dummy_boundary_list(0);
-        int current_num_rings = 1;
-        halo_rows_P_local_col_indices.resize(halo_rows_P_col_indices.size());
-        // Convert the global indices in the rows just received to local indices
-        // This function updates halo offsets, halo_rows_P_local_col_indices, local_to_global_map
-        // This should not modify the existing P manager
-        //prep->compute_local_halo_indices( P.row_offsets, P.col_indices, halo_rows_P_row_offsets, halo_rows_P_col_indices, halo_rows_P_local_col_indices, RAP.manager->local_to_global_map,  dummy_boundary_list, P_neighbors, P_halo_ranges_h, P_halo_ranges, P_halo_offsets, coarse_base_index, num_owned_coarse_pts, P.get_num_rows(), current_num_rings);
-
-    // This function checks the halo_col_indices received from the neighbors, and identifies
-    // new halo_indices and  updates halo_offsets, local_to_global_map accordingly
-    // input: halo row offsets,
-    //        halo global column indices
-    //        current local to global map
-    //        neighbors (new discovered neighbors should already be included)
-    //        halo_ranges for the neighbors
-    //
-    // output: halo offsets,
-    //         halo local column indices,
-    //         updated local to global map (in place)
-    int size = A_num_rows;
-    //TODO: Are these the optimal block_sizes?
-    int num_blocks = min(4096, (size + 127) / 128);
-    int num_neighbors = neighbors.size();
-    // compute neighbor offsets & total number of neighbor rows
-    int total_rows_of_neighbors = 0;
-    std::vector<int> neighbor_offsets_h(num_neighbors + 1, 0);
-    int max_neighbor_size = 0;
-
-    for (int i = 0; i < num_neighbors; i ++)
-    {
-        total_rows_of_neighbors += halo_ranges_h[2 * i + 1] - halo_ranges_h[2 * i];
-        neighbor_offsets_h[i + 1] = neighbor_offsets_h[i] + halo_ranges_h[2 * i + 1] - halo_ranges_h[2 * i];
-        max_neighbor_size = max_neighbor_size > (halo_ranges_h[2 * i + 1] - halo_ranges_h[2 * i]) ? max_neighbor_size : (halo_ranges_h[2 * i + 1] - halo_ranges_h[2 * i]);
-    }
-
-    // copy offsets to device
-    IVector neighbor_offsets(num_neighbors + 1);
-    thrust::copy(neighbor_offsets_h.begin(), neighbor_offsets_h.end(), neighbor_offsets.begin());
-    // store flags for all neighbor nodes
-    IVector neighbor_nodes(total_rows_of_neighbors);
-    // flag neighbor nodes that are in the existing rings as -(local_index)-1
-    thrust::fill(neighbor_nodes.begin(), neighbor_nodes.end(), 0);
-    cudaCheckError();
-    int local_to_global_size = local_to_global.size();
-    int num_blocks2 = min(4096, (local_to_global_size + 127) / 128);
-
-    if (local_to_global_size != 0)
-    {
-        flag_halo_nodes_local_v2 <<< num_blocks2, 128>>>(halo_ranges.raw(), neighbor_nodes.raw(), neighbor_offsets.raw(), base_index, index_range, num_neighbors, local_to_global_size, local_to_global.raw());
-        cudaCheckError();
-    }
-
-    // 1) flag NEW neighbors nodes that I need as 1, they will be in the 2nd ring
-    // 2) fill out local indices for 1st ring & internal indices
-    int num_halos = halo_row_offsets.size();
-
-    for (int i = 0; i < num_halos; i++)
-    {
-        int size = halo_global_indices[i].size();
-
-        if (size > 0)
-        {
-            halo_local_indices[i].resize(size);
-            thrust::fill(halo_local_indices[i].begin(), halo_local_indices[i].end(), -1); // fill with -1
-            // TODO: launch only on halo rows
-            flag_halo_nodes_global<16, 1> <<< num_blocks, 128>>>(halo_row_offsets[i].raw(), halo_row_offsets[i].size() - 1, halo_global_indices[i].raw(), halo_ranges.raw(), neighbor_nodes.raw(), neighbor_offsets.raw(), base_index, index_range, num_neighbors, halo_local_indices[i].raw());
-        }
-    }
-
-    cudaCheckError();
-    // replace all negative values with 0 in neighbor flags
-    is_less_than_zero pred;
-    thrust::replace_if(neighbor_nodes.begin(), neighbor_nodes.end(), pred, 0);
-    cudaCheckError();
-    // fill halo offsets for the current number of  ring for new neighbors (it will be of size 0)
-    int current_num_neighbors = (halo_offsets.size() - 1) / current_num_rings;;
-    int num_rings = current_num_rings + 1;
-    IVector_h new_halo_offsets(num_rings * num_neighbors + 1);
-
-    for (int j = 0; j < current_num_rings; j++)
-    {
-        for (int i = 0 ; i <= current_num_neighbors; i++)
-        {
-            new_halo_offsets[num_neighbors * j + i] = halo_offsets[current_num_neighbors * j + i];
-        }
-
-        for (int i = current_num_neighbors; i < num_neighbors; i++)
-        {
-            new_halo_offsets[num_neighbors * j + i + 1] = new_halo_offsets[num_neighbors * j + i];
-        }
-    }
-
-    halo_offsets = new_halo_offsets;
-    int ring = current_num_rings;
-    int current_num_halo_indices = local_to_global.size();
-    //int halo_base = index_range + current_num_halo_indices;
-    cudaCheckError();
-
-    // compute neighbors nodes indices (in-place) for each neighbor
-    for (int i = 0; i < num_neighbors; i++)
-    {
-        int last_node, num_halo;
-
-        if (neighbor_offsets_h[i + 1] != neighbor_offsets_h[i])
-        {
-            last_node = neighbor_nodes[neighbor_offsets_h[i + 1] - 1];
-            thrust_wrapper::exclusive_scan(neighbor_nodes.begin() + neighbor_offsets_h[i], neighbor_nodes.begin() + neighbor_offsets_h[i + 1], neighbor_nodes.begin() + neighbor_offsets_h[i]);
-            num_halo = neighbor_nodes[neighbor_offsets_h[i + 1] - 1] + last_node;
-        }
-        else
-        {
-            num_halo = 0;
-            last_node = 0;
-        }
-
-        // update halo offsets (L2H)
-        halo_offsets[ring * num_neighbors + i + 1] = halo_offsets[ring * num_neighbors + i] + num_halo;
-
-        // if size = 0 then we don't need to compute it
-        if (boundary_lists.size() > 0)
-        {
-            // create my boundary lists = list of neighbor inner nodes corresponding to halo numbers 0..M
-            // basically this will be our 2-ring B2L_maps
-            boundary_lists[i].resize(num_halo);
-            int size = neighbor_offsets_h[i + 1] - neighbor_offsets_h[i];
-            num_blocks = min(4096, (size + 127) / 128);
-
-            if (size > 0)
-            {
-                populate_B2L <<< num_blocks, 128>>>(neighbor_nodes.raw() + neighbor_offsets_h[i], boundary_lists[i].raw(), last_node, size);
-                cudaCheckError();
-            }
-        }
-    }
-
-    cudaCheckError();
-    // compute local indices and new local to global mapping
-    int new_num_halo_indices = halo_offsets[num_rings * num_neighbors] - halo_offsets[current_num_rings * num_neighbors];
-    local_to_global.resize(current_num_halo_indices + new_num_halo_indices);
-    IVector halo_offsets_d(halo_offsets.size());
-    thrust::copy(halo_offsets.begin(), halo_offsets.end(), halo_offsets_d.begin());
-    cudaCheckError();
-
-    // do this for all ring-1 neighbors
-    for (int i = 0; i < num_halos; i++)
-    {
-        int num_neighbor_rows = halo_row_offsets[i].size() - 1;
-        num_blocks = min(4096, (num_neighbor_rows + 127) / 128);
-
-        if (num_blocks > 0)
-        {
-            calc_new_halo_mapping_ring2<16> <<< num_blocks, 128>>>(
-                halo_row_offsets[i].raw(), num_neighbor_rows, halo_global_indices[i].raw(),                     // halo rows to process
-                halo_ranges.raw(), base_index, index_range, num_neighbors,                          // ranges and # of neighbors
-                halo_offsets_d.raw() + current_num_rings * num_neighbors, neighbor_offsets.raw(), neighbor_nodes.raw(),     // halo offsets, neighbor offsets and indices
-                local_to_global.raw(), halo_local_indices[i].raw());                                    // output
-        }
-    }
-
-    cudaCheckError();
-
-        // Append the new rows to the matrix P
-        P.set_initialized(0);
-        prep->append_halo_rows(P, halo_rows_P_row_offsets, halo_rows_P_local_col_indices, halo_rows_P_values);
-        P.set_initialized(1);
-    #endif
-
-    cudaCheckError();
-    // At this point, we can compute RAP_full which contains some rows that will need to be sent to neighbors
-    // i.e. RAP_full = [ RAP_int ]
-    //                 [ RAP_ext ]
-    // RAP is [ RAP_int ] + [RAP_ext_received_from_neighbors]
-    // We can reuse the serial galerkin product since R, A and P use local indices
-    // TODO: latency hiding (i.e. compute RAP_ext, exchange_matrix_halo, then do RAP_int)
-    /* WARNING: do not recompute prolongation (P) and restriction (R) when you
-                are reusing the level structure (structure_reuse_levels > 0) */
-    /* We force for matrix P to have only owned rows to be seen for the correct galerkin product computation*/
-    P.set_initialized(0);
-    P.set_num_rows(num_owned_fine_pts);
-    P.addProps( CSR );
-    P.set_initialized(1);
-
-    if (this->isReuseLevel() == false)
-    {
-        this->R.set_initialized( 0 );
-        this->R.addProps( CSR );
-        // Take the tranpose of P to get R
-        // Single-GPU transpose, no mpi exchange
-        this->computeRestrictionOperator();
-        this->R.set_initialized( 1 );
-    }
-
-    Matrix<TConfig_d> RAP_full;
-    // Initialize the workspace needed for galerkin product
-    void *wk = AMG_Level<TConfig_d>::amg->getCsrWorkspace();
-
-    if ( wk == NULL )
-    {
-        wk = CSR_Multiply<TConfig_d>::csr_workspace_create( *(AMG_Level<TConfig_d>::amg->m_cfg), AMG_Level<TConfig_d>::amg->m_cfg_scope );
-        AMG_Level<TConfig_d>::amg->setCsrWorkspace( wk );
-    }
-
-    // Single-GPU RAP, no mpi exchange
-    RAP_full.set_initialized( 0 );
-    /* WARNING: Since A is reordered (into interior and boundary nodes), while R and P are not reordered,
-                you must unreorder A when performing R*A*P product in ordre to obtain the correct result. */
-    CSR_Multiply<TConfig_d>::csr_galerkin_product( this->R, this->getA(), this->P, RAP_full,
-            /* permutation for rows of R, A and P */       NULL, NULL /*&(this->getA().manager->renumbering)*/,        NULL,
-            /* permutation for cols of R, A and P */       NULL, NULL /*&(this->getA().manager->inverse_renumbering)*/, NULL,
-            wk );
-    RAP_full.set_initialized( 1 );
-    this->Profile.toc("computeA");
-    // ----------------------------------------------------------------------------------------------
-    // Now, send rows of RAP_full requireq by neighbors, received rows from neighbors and create RAP
-    // ----------------------------------------------------------------------------------------------
-    prep->exchange_RAP_ext(RAP, RAP_full, A, this->P, P_halo_offsets, RAP.manager->local_to_global_map, P_neighbors, P_halo_ranges_h, P_halo_ranges, RAP.manager->part_offsets_h, RAP.manager->part_offsets, num_owned_coarse_pts, RAP.manager->part_offsets_h[my_rank], wk);
-    // Delete temporary distributed arranger
-    delete prep;
-
-    /* WARNING: The RAP matrix generated at this point contains extra rows (that correspond to rows of R,
-       that was obtained by locally transposing P). This rows are ignored by setting the # of matrix rows
-       to be smaller, so that they correspond to number of owned coarse nodes. This should be fine, but
-       it leaves holes in the matrix as there might be columns that belong to the extra rows that now do not
-       belong to the smaller matrix with number of owned coarse nodes rows. The same is trued about the
-       local_to_global_map. These two data structures match at this point. However, in the next calls
-       local_to_global (exclusively) will be used to geberate B2L_maps (wihtout going through column indices)
-       which creates extra elements in the B2L that simply do not exist in the new matrices. I strongly suspect
-       this is the reason fore the bug. The below fix simply compresses the matrix so that there are no holes
-       in it, or in the local_2_global_map. */
-    //mark local_to_global_columns that exist in the owned coarse nodes rows.
-    IndexType nrow = RAP.get_num_rows();
-    IndexType ncol = RAP.get_num_cols();
-    IndexType nl2g = ncol - nrow;
-
-    if (nl2g > 0)
-    {
-        IVector   l2g_p(nl2g + 1, 0); //+1 is needed for prefix_sum/exclusive_scan
-        I64Vector l2g_t(nl2g, 0);
-        IndexType nblocks = (nrow + AMGX_CAL_BLOCK_SIZE - 1) / AMGX_CAL_BLOCK_SIZE;
-
-        if (nblocks > 0)
-            flag_existing_local_to_global_columns<int> <<< nblocks, AMGX_CAL_BLOCK_SIZE>>>
-            (nrow, RAP.row_offsets.raw(), RAP.col_indices.raw(), l2g_p.raw());
-
-        cudaCheckError();
-        /*
-        //slow version of the above kernel
-        for(int ii=0; ii<nrow; ii++){
-            int s = RAP.row_offsets[ii];
-            int e = RAP.row_offsets[ii+1];
-            for (int jj=s; jj<e; jj++) {
-                int col = RAP.col_indices[jj];
-                if (col>=nrow){
-                    int kk = col-RAP.get_num_rows();
-                    l2g_p[kk] = 1;
-                }
-            }
-        }
-        cudaCheckError();
-        */
-        //create a pointer map for their location using prefix sum
-        thrust_wrapper::exclusive_scan(l2g_p.begin(), l2g_p.end(), l2g_p.begin());
-        int new_nl2g = l2g_p[nl2g];
-
-        //compress the columns using the pointer map
-        if (nblocks > 0)
-            compress_existing_local_columns<int> <<< nblocks, AMGX_CAL_BLOCK_SIZE>>>
-            (nrow, RAP.row_offsets.raw(), RAP.col_indices.raw(), l2g_p.raw());
-
-        cudaCheckError();
-        /*
-        //slow version of the above kernel
-        for(int ii=0; ii<nrow; ii++){
-            int s = RAP.row_offsets[ii];
-            int e = RAP.row_offsets[ii+1];
-            for (int jj=s; jj<e; jj++) {
-                int col = RAP.col_indices[jj];
-                if (col>=nrow){
-                    int kk = col-RAP.get_num_rows();
-                    RAP.col_indices[jj] = nrow+l2g_p[kk];
-                }
-            }
-        }
-        cudaCheckError();
-        */
-        //adjust matrix size (number of columns) accordingly
-        RAP.set_initialized(0);
-        RAP.set_num_cols(nrow + new_nl2g);
-        RAP.set_initialized(1);
-        //compress local_to_global_map using the pointer map
-        nblocks = (nl2g + AMGX_CAL_BLOCK_SIZE - 1) / AMGX_CAL_BLOCK_SIZE;
-
-        if (nblocks > 0)
-            compress_existing_local_to_global_columns<int, int64_t> <<< nblocks, AMGX_CAL_BLOCK_SIZE>>>
-            (nl2g, RAP.manager->local_to_global_map.raw(), l2g_t.raw(), l2g_p.raw());
-
-        cudaCheckError();
-        thrust::copy(l2g_t.begin(), l2g_t.begin() + new_nl2g, RAP.manager->local_to_global_map.begin());
-        cudaCheckError();
-        /*
-        //slow version of the above kernel (through Thrust)
-        for(int ii=0; ii<(l2g_p.size()-1); ii++){
-            if (l2g_p[ii] != l2g_p[ii+1]){
-                RAP.manager->local_to_global_map[l2g_p[ii]] = RAP.manager->local_to_global_map[ii];
-            }
-        }
-        cudaCheckError();
-        */
-        //adjust local_to_global_map size accordingly
-        RAP.manager->local_to_global_map.resize(new_nl2g);
-    }
-
-    // we also need to renumber columns of P and rows or R correspondingly since we changed RAP halo columns
-    // for R we just keep track of renumbering in and exchange proper vectors in restriction
-    // for P we actually need to renumber columns for prolongation:
-    if (A.is_matrix_distributed() && this->A->manager->get_num_partitions() > 1)
-    {
-        RAP.set_initialized(0);
-        // Renumber the owned nodes as interior and boundary (renumber rows and columns)
-        // We are passing reuse flag to not create neighbours list from scratch, but rather update based on new halos
-        RAP.manager->renumberMatrixOneRing(this->isReuseLevel());
-        // Renumber the column indices of P and shuffle rows of P
-        RAP.manager->renumber_P_R(this->P, this->R, A);
-        // Create the B2L_maps for RAP
-        {
-            nvtxRange fdafds("createOneRingHaloRows RAP");
-            RAP.manager->createOneRingHaloRows();
-        }
-        RAP.manager->getComms()->set_neighbors(RAP.manager->num_neighbors());
-        RAP.setView(OWNED);
-        RAP.set_initialized(1);
-        // update # of columns in P - this is necessary for correct CSR multiply
-        this->P.set_initialized(0);
-        int new_num_cols = thrust_wrapper::reduce(this->P.col_indices.begin(), this->P.col_indices.end(), int(0), thrust::maximum<int>()) + 1;
-        cudaCheckError();
-        this->P.set_num_cols(new_num_cols);
-        this->P.set_initialized(1);
-    }
-
-    RAP.copyAuxData(&A);
-
-    if (!A.is_matrix_singleGPU() && RAP.manager == NULL)
-    {
-        RAP.manager = new DistributedManager<TConfig_d>();
-    }
-
-    if (this->getA().is_matrix_singleGPU())
-    {
-        this->m_next_level_size = this->getNextLevel(typename Matrix<TConfig_d>::memory_space() )->getA().get_num_rows() * this->getNextLevel(typename Matrix<TConfig_d>::memory_space() )->getA().get_block_dimy();
-    }
-    else
-    {
-        // m_next_level_size is the size that will be used to allocate xc, bc vectors
-        int size, offset;
-        this->getNextLevel(typename Matrix<TConfig_d>::memory_space())->getA().getOffsetAndSizeForView(FULL, &offset, &size);
-        this->m_next_level_size = size * this->getNextLevel(typename Matrix<TConfig_d>::memory_space() )->getA().get_block_dimy();
-    }
-
-    printf("FLATTERNED COMPLETE\n");
-}
-
 template <class T_Config>
 void Classical_AMG_Level_Base<T_Config>::createCoarseMatrices()
 {
@@ -1724,6 +1001,879 @@ void Classical_AMG_Level_Base<T_Config>::unconsolidateVector(VVector &x)
 #endif
 #endif
 }
+
+
+
+
+
+
+
+
+
+
+
+template <AMGX_VecPrecision t_vecPrec, AMGX_MatPrecision t_matPrec, AMGX_IndPrecision t_indPrec>
+void Classical_AMG_Level<TemplateConfig<AMGX_host, t_vecPrec, t_matPrec, t_indPrec> >::createCoarseMatricesFlattened()
+{
+}
+
+template <int coop, class T>
+__global__ void export_matrix_elements_global_flat(INDEX_TYPE *row_offsets, T *values, INDEX_TYPE bsize, INDEX_TYPE *maps, INDEX_TYPE *pointers, T *output, INDEX_TYPE *col_indices, int64_t *output2, INDEX_TYPE size, int64_t *local_to_global, INDEX_TYPE *q, INDEX_TYPE num_owned_pts, int64_t base_index)
+{
+    int idx = blockIdx.x * blockDim.x / coop + threadIdx.x / coop;
+    int coopIdx = threadIdx.x % coop;
+
+    while (idx < size)
+    {
+        int row = maps[idx];
+
+        if (q != NULL)
+        {
+            row = q[row];
+        }
+
+        INDEX_TYPE src_base = row_offsets[row];
+        INDEX_TYPE dst_base = pointers[idx];
+
+        for (int m = coopIdx; m < row_offsets[row + 1]*bsize - src_base * bsize; m += coop)
+        {
+            output[dst_base * bsize + m] = values[src_base * bsize + m];
+        }
+
+        for (int m = coopIdx; m < row_offsets[row + 1] - src_base; m += coop)
+        {
+            int col = col_indices[src_base + m];
+
+            if (col < num_owned_pts)
+            {
+                output2[dst_base + m] = (int64_t) col_indices[src_base + m] + base_index;
+            }
+            else
+            {
+                output2[dst_base + m] = local_to_global[col_indices[src_base + m] - num_owned_pts];
+            }
+        }
+
+        idx += gridDim.x * blockDim.x / coop;
+    }
+}
+
+__global__ void write_matrix_rowsize_flat(INDEX_TYPE *maps, INDEX_TYPE *row_offsets, INDEX_TYPE size, INDEX_TYPE *output)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    while (idx < size)
+    {
+        int row = maps[idx];
+        output[idx] = row_offsets[row + 1] - row_offsets[row];
+        idx += gridDim.x * blockDim.x;
+    }
+}
+
+template <int coop>
+__global__ void calc_num_neighbors_v2_global_flat(INDEX_TYPE *row_offsets, int64_t *col_indices, int64_t *part_offsets, INDEX_TYPE *exists, INDEX_TYPE num_part, INDEX_TYPE my_id, INDEX_TYPE num_rows)
+{
+    int row = blockIdx.x * blockDim.x / coop + threadIdx.x / coop;
+    int coopIdx = threadIdx.x % coop;
+    int64_t start = part_offsets[my_id];
+    int64_t end = part_offsets[my_id + 1];
+
+    while (row < num_rows)
+    {
+        for (int i = row_offsets[row] + coopIdx; i < row_offsets[row + 1]; i += coop)
+        {
+            int64_t col = col_indices[i];
+
+            // Check if column point to halo node
+            if (col < start || col >= end)
+            {
+                int part = 0;
+
+                while (part < num_part && (col < part_offsets[part] || col >= part_offsets[part + 1]))
+                {
+                    part++;
+                }
+
+                if (part < num_part && (col >= part_offsets[part] && col < part_offsets[part + 1]))
+                {
+                    exists[part] = 1;
+                }
+            }
+        }
+
+        row += gridDim.x * blockDim.x / coop;
+    }
+}
+
+template <int coop, int set_val>
+__global__ void flag_halo_nodes_global_flat(INDEX_TYPE *row_offsets, INDEX_TYPE num_rows, int64_t *global_col_indices, int64_t *part_ranges, INDEX_TYPE *flags, INDEX_TYPE *flag_offsets, int64_t base, INDEX_TYPE range, INDEX_TYPE num_neighbors, INDEX_TYPE *local_col_indices)
+{
+    int row = blockIdx.x * blockDim.x / coop + threadIdx.x / coop;
+    int coopIdx = threadIdx.x % coop;
+
+    while (row < num_rows)
+    {
+        for (int i = row_offsets[row] + coopIdx; i < row_offsets[row + 1]; i += coop)
+        {
+            int64_t col = global_col_indices[i];
+
+            if (col < base || col >= base + range)
+            {
+                // exterior node
+                int part = 0;
+
+                while (part < num_neighbors && (col < part_ranges[2 * part] || col >= part_ranges[2 * part + 1])) { part++; }
+
+                if (part < num_neighbors && (col >= part_ranges[2 * part] && col < part_ranges[2 * part + 1]))
+                {
+                    // check if the flag is already set (i.e. 1-ring node) then skip it
+                    int flag = flags[flag_offsets[part] + col - part_ranges[2 * part]];
+
+                    if (flag == 0)
+                    {
+                        flags[flag_offsets[part] + col - part_ranges[2 * part]] = set_val;
+                    }
+                    else if (flag < 0)    // it is possible that flag is already set to 1 in this kernel, so if it's negative then it's the 1st ring
+                    {
+                        // update local index, note that local to global mapping is unchanged for 1st ring
+                        local_col_indices[i] = -flags[flag_offsets[part] + col - part_ranges[2 * part]] - 1;
+                    }
+                }
+            }
+            else
+            {
+                // interior node
+                local_col_indices[i] = col - base;
+            }
+        }
+
+        row += gridDim.x * blockDim.x / coop;
+    }
+}
+
+struct is_less_than_zero
+{
+    __host__ __device__
+    bool operator()(int x) const
+    {
+        return x < 0;
+    }
+};
+
+template <int coop>
+__global__ void calc_new_halo_mapping_ring2_flat(INDEX_TYPE *row_offsets, INDEX_TYPE num_rows, int64_t *global_col_indices, int64_t *part_ranges, int64_t base, INDEX_TYPE range, INDEX_TYPE num_neighbors, INDEX_TYPE *halo_offsets, INDEX_TYPE *neighbor_offsets, INDEX_TYPE *neighbor_nodes, int64_t *local_to_global, INDEX_TYPE *local_col_indices)
+{
+    int row = blockIdx.x * blockDim.x / coop + threadIdx.x / coop;
+    int coopIdx = threadIdx.x % coop;
+
+    while (row < num_rows)
+    {
+        for (int i = row_offsets[row] + coopIdx; i < row_offsets[row + 1]; i += coop)
+        {
+            int64_t col = global_col_indices[i];
+
+            if ((col < base || col >= base + range) && local_col_indices[i] == -1)
+            {
+                // update only 2nd ring halo indices here, 1st ring is updated already
+                int part = 0;
+
+                while (part < num_neighbors && (col < part_ranges[2 * part] || col >= part_ranges[2 * part + 1])) { part++; }
+
+                if (part < num_neighbors && (col >= part_ranges[2 * part] && col < part_ranges[2 * part + 1]))
+                {
+                    int pos = col - part_ranges[2 * part];
+                    local_col_indices[i] = halo_offsets[part] + neighbor_nodes[neighbor_offsets[part] + pos];
+                    local_to_global[local_col_indices[i] - range] = col;
+                }
+            }
+        }
+
+        row += gridDim.x * blockDim.x / coop;
+    }
+}
+
+__global__ void flag_halo_nodes_local_v2_flat(int64_t *part_ranges, INDEX_TYPE *flags, INDEX_TYPE *flag_offsets, int64_t base, INDEX_TYPE range, INDEX_TYPE num_part, INDEX_TYPE local_to_global_size, int64_t *local_to_global)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    while (tid < local_to_global_size)
+    {
+        int64_t global_col = local_to_global[tid];
+        int col =  range + tid;
+        // Identify the partition that owns that node
+        int part = 0;
+
+        while (part < num_part && (global_col < part_ranges[2 * part] || global_col >= part_ranges[2 * part + 1])) { part++; }
+
+        // Flag the corresponding node in flags array
+        if (part < num_part && (global_col >= part_ranges[2 * part] && global_col < part_ranges[2 * part + 1]))
+        {
+            flags[flag_offsets[part] + global_col - part_ranges[2 * part]] = -col - 1;
+        }
+
+        tid += gridDim.x * blockDim.x;
+    }
+}
+
+__global__ void populate_B2L_flat(INDEX_TYPE *indexing, INDEX_TYPE *output, INDEX_TYPE last, INDEX_TYPE size)
+{
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+
+    while (row < size)
+    {
+        if (row == size - 1)
+        {
+            if (last) { output[indexing[row]] = row; }
+        }
+        else if (indexing[row] != indexing[row + 1])
+        {
+            output[indexing[row]] = row;
+        }
+
+        row += gridDim.x * blockDim.x;
+    }
+}
+
+template <AMGX_VecPrecision t_vecPrec, AMGX_MatPrecision t_matPrec, AMGX_IndPrecision t_indPrec>
+void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indPrec> >::createCoarseMatricesFlattened()
+{
+    Matrix<TConfig_d> &RAP = this->getNextLevel( typename Matrix<TConfig_d>::memory_space( ) )->getA( );
+    Matrix<TConfig_d> &A = this->getA();
+    Matrix<TConfig_d> &P = this->P;
+
+    #if 0
+    // allocate aggressive interpolator if needed
+    if (AMG_Level<TConfig_d>::getLevelIndex() < this->num_aggressive_levels)
+    {
+        if (this->interpolator) { delete this->interpolator; }
+
+        this->interpolator = chooseAggressiveInterpolator<TConfig_d>(AMG_Level<TConfig_d>::amg->m_cfg, AMG_Level<TConfig_d>::amg->m_cfg_scope);
+    }
+    #endif
+
+    /* WARNING: exit if D1 interpolator is selected in distributed setting */
+    std::string s("");
+    s += AMG_Level<TConfig_d>::amg->m_cfg->AMG_Config::getParameter<std::string>("interpolator", AMG_Level<TConfig_d>::amg->m_cfg_scope);
+
+    if (A.is_matrix_distributed() && (s.compare("D1") == 0))
+    {
+        FatalError("D1 interpolation is not supported in distributed settings", AMGX_ERR_NOT_IMPLEMENTED);
+    }
+
+    /* WARNING: do not recompute prolongation (P) and restriction (R) when you
+                are reusing the level structure (structure_reuse_levels > 0) */
+    if (this->isReuseLevel() == false)
+    {
+        //generate the interpolation matrix
+        this->interpolator->generateInterpolationMatrix(A, this->m_cf_map, this->m_s_con, this->m_scratch, P, AMG_Level<TConfig_d>::amg);
+
+        this->m_cf_map.clear();
+        this->m_cf_map.shrink_to_fit();
+        this->m_scratch.clear();
+        this->m_scratch.shrink_to_fit();
+        this->m_s_con.clear();
+        this->m_s_con.shrink_to_fit();
+
+        // truncate based on max # of elements if desired
+        if (this->max_elmts > 0 && P.get_num_rows() > 0)
+        {
+            Truncate<TConfig_d>::truncateByMaxElements(P, this->max_elmts);
+        }
+
+        if (this->m_min_rows_latency_hiding < 0 || P.get_num_rows() < this->m_min_rows_latency_hiding)
+        {
+            // This will cause bsrmv_with_mask to not do latency hiding
+            P.setInteriorView(OWNED);
+            P.setExteriorView(OWNED);
+        }
+    }
+
+    RAP.addProps(CSR);
+    RAP.set_block_dimx(this->getA().get_block_dimx());
+    RAP.set_block_dimy(this->getA().get_block_dimy());
+    IndexType num_parts = A.manager->get_num_partitions();
+    IndexType num_neighbors = A.manager->num_neighbors();
+    IndexType my_rank = A.manager->global_id();
+    // OWNED includes interior and boundary
+    A.setView(OWNED);
+    int num_owned_coarse_pts = P.manager->halo_offsets[0];
+    int num_owned_fine_pts = A.manager->halo_offsets[0];
+
+    // Initialize RAP.manager
+    if (RAP.manager == NULL)
+    {
+        RAP.manager = new DistributedManager<TConfig_d>();
+    }
+
+    RAP.manager->A = &RAP;
+    RAP.manager->setComms(A.manager->getComms());
+    RAP.manager->set_global_id(my_rank);
+    RAP.manager->set_num_partitions(num_parts);
+    RAP.manager->part_offsets_h = P.manager->part_offsets_h;
+    RAP.manager->part_offsets = P.manager->part_offsets;
+    RAP.manager->set_base_index(RAP.manager->part_offsets_h[my_rank]);
+    RAP.manager->set_index_range(num_owned_coarse_pts);
+    RAP.manager->num_rows_global = RAP.manager->part_offsets_h[num_parts];
+
+    // --------------------------------------------------------------------
+    // Using the B2L_maps of matrix A, identify the rows of P that need to be sent to neighbors,
+    // so that they can compute A*P
+    // Once rows of P are identified, convert the column indices to global indices, and send them to neighbors
+    //  ---------------------------------------------------------------------------
+    // Copy some information about the manager of P, since we don't want to modify those
+    IVector_h P_neighbors = P.manager->neighbors;
+    I64Vector_h P_halo_ranges_h = P.manager->halo_ranges_h;
+    I64Vector_d P_halo_ranges = P.manager->halo_ranges;
+    RAP.manager->local_to_global_map = P.manager->local_to_global_map;
+    IVector_h P_halo_offsets = P.manager->halo_offsets;
+    // Create a temporary distributed arranger
+    DistributedArranger<TConfig_d> *prep = new DistributedArranger<TConfig_d>;
+    #if 0
+        prep->exchange_halo_rows_P(A, P, RAP.manager->local_to_global_map, P_neighbors, P_halo_ranges_h, P_halo_ranges, P_halo_offsets, RAP.manager->part_offsets_h, RAP.manager->part_offsets, num_owned_coarse_pts, RAP.manager->part_offsets_h[my_rank]);
+    #else
+        int coarse_base_index = RAP.manager->part_offsets_h[my_rank];
+        if (P.hasProps(DIAG) || P.get_block_size() != 1)
+        {
+            FatalError("P with external diagonal or block_size != 1 not supported", AMGX_ERR_NOT_IMPLEMENTED);
+        }
+
+        typedef typename Matrix<TConfig_d>::MVector MVector;
+        std::vector<IVector> halo_rows_P_row_offsets;
+        std::vector<I64Vector> halo_rows_P_col_indices;
+        std::vector<IVector> halo_rows_P_local_col_indices;
+        std::vector<MVector> halo_rows_P_values;
+
+        // In this function, store in halo_rows_P_row_offsets, halo_rows_P_col_indices and halo_rows_P_values, the rows of P that need to be sent to each neighbors
+        // halo_rows_P_col_indices stores global indices
+
+        halo_rows_P_row_offsets.resize(num_neighbors);
+        halo_rows_P_col_indices.resize(num_neighbors);
+        halo_rows_P_values.resize(num_neighbors);
+        int num_rings_to_send = 1;
+        //Scratch space computation
+        int max_size = 0;
+
+        for (int i = 0; i < num_neighbors; i++)
+        {
+            max_size = max_size > A.manager->B2L_rings[i][num_rings_to_send] ? max_size : A.manager->B2L_rings[i][num_rings_to_send];
+        }
+
+        IVector matrix_halo_sizes(max_size + 1);
+
+        // Here only using the 1-ring of matrix A
+        for (int i = 0; i < num_neighbors; i++)
+        {
+            // Write the length of the rows in the order of B2L_maps, then calculate row_offsets
+            int size = A.manager->B2L_rings[i][num_rings_to_send];
+
+            if (size != 0)
+            {
+                //matrix_halo_sizes.resize(size+1);
+                int num_blocks = min(4096, (size + 127) / 128);
+                write_matrix_rowsize_flat <<< num_blocks, 128>>>(A.manager->B2L_maps[i].raw(), P.row_offsets.raw(), size, matrix_halo_sizes.raw());
+                thrust_wrapper::exclusive_scan(matrix_halo_sizes.begin(), matrix_halo_sizes.begin() + size + 1, matrix_halo_sizes.begin());
+                int nnz_count =  matrix_halo_sizes[size];
+                // Resize export halo matrix, and copy over the rows
+                halo_rows_P_row_offsets[i].resize(size + 1);
+                halo_rows_P_col_indices[i].resize(nnz_count);
+                halo_rows_P_values[i].resize(nnz_count);
+                /* WARNING: Since A is reordered (into interior and boundary nodes), while R and P are not reordered,
+                            you must unreorder A when performing R*A*P product in ordre to obtain the correct result. */
+                export_matrix_elements_global_flat<32> <<< num_blocks, 128>>>(P.row_offsets.raw(), P.values.raw(), P.get_block_size(), A.manager->B2L_maps[i].raw(), matrix_halo_sizes.raw(), halo_rows_P_values[i].raw(), P.col_indices.raw(), halo_rows_P_col_indices[i].raw(), size, RAP.manager->local_to_global_map.raw(), NULL /*A.manager->inverse_renumbering.raw()*/, num_owned_coarse_pts, coarse_base_index);
+                thrust::copy(matrix_halo_sizes.begin(), matrix_halo_sizes.begin() + size + 1, halo_rows_P_row_offsets[i].begin());
+            }
+            else
+            {
+                halo_rows_P_row_offsets[i].resize(0);
+                halo_rows_P_col_indices[i].resize(0);
+                halo_rows_P_values[i].resize(0);
+            }
+        }
+
+        // Do the exchange with the neighbors
+        // On return, halo_rows_P_rows_offsets, halo_rows_P_col_indices and halo_rows_P_values stores the rows of P received from each neighbor (rows needed to perform A*P)
+        std::vector<I64Vector> dummy_halo_ids(0);
+        A.manager->getComms()->exchange_matrix_halo(halo_rows_P_row_offsets, halo_rows_P_col_indices, halo_rows_P_values, dummy_halo_ids, A.manager->neighbors, A.manager->global_id());
+        halo_rows_P_local_col_indices.resize(halo_rows_P_col_indices.size());
+
+        for (int i = 0; i < halo_rows_P_col_indices.size(); i++)
+        {
+            halo_rows_P_local_col_indices[i].resize(halo_rows_P_col_indices[i].size());
+        }
+
+        // Update the list of neighbors "P_neighbors" and the corresponding ranges, offsets
+        //update_neighbors_list(&A, &neighbors, &halo_ranges_h, &halo_ranges, &part_offsets_h, &part_offsets, &halo_rows_row_offsets, &halo_rows_col_indices)
+        //prep->update_neighbors_list(A, P_neighbors, P_halo_ranges_h, P_halo_ranges, RAP.manager->part_offsets_h, RAP.manager->part_offsets, halo_rows_P_row_offsets, halo_rows_P_col_indices);
+        int num_partitions = A.manager->get_num_partitions();
+        int my_id = A.manager->global_id();
+        int total_halo_rows = 0;
+        int total_halo_nnz = 0;
+        IVector neighbor_flags(num_partitions, 0);
+
+        for (int i = 0; i < halo_rows_P_row_offsets.size(); i++)
+        {
+            int num_halo_rows = halo_rows_P_row_offsets[i].size() - 1;
+
+            if (num_halo_rows > 0)
+            {
+                total_halo_rows += num_halo_rows;
+                total_halo_nnz += halo_rows_P_row_offsets[i][num_halo_rows];
+                int num_blocks = min(4096, (num_halo_rows + 127) / 128);
+                calc_num_neighbors_v2_global_flat<16> <<< num_blocks, 128>>>(halo_rows_P_row_offsets[i].raw(), halo_rows_P_col_indices[i].raw(),
+                        RAP.manager->part_offsets.raw(), neighbor_flags.raw(), num_partitions, my_id, num_halo_rows);
+            }
+        }
+
+        cudaCheckError();
+        IVector_h neighbor_flags_h = neighbor_flags;
+
+        // unset 1-ring neighbors & myself
+        for (int i = 0; i < num_neighbors; i++)
+        {
+            neighbor_flags_h[P_neighbors[i]] = 0;
+        }
+
+        neighbor_flags_h[my_id] = 0;
+        // this will update neighbor list and halo ranges, note that we don't change 1-ring neighbors order
+        //prep->append_neighbors(A, P_neighbors, P_halo_ranges_h, P_halo_ranges, neighbor_flags_h, RAP.manager->part_offsets_h);
+        // append_neighbors(&A, &neighbors, &halo_ranges_h, &halo_ranges, &neighbor_flags, &part_offsets_h)
+
+        // This function creates arrays neighbors, halo_ranges_h and halo_ranges
+        // base on neighbor_flags
+        // Here do an MPI_allgather to figure out which partitions need data from me
+        // This is required for non-symmetric matrices
+        int num_part = A.manager->get_num_partitions();
+        // pack 0/1 array into array of integers (size/32)
+        int packed_size = (num_part + 32 - 1) / 32;
+        IVector_h packed_nf(packed_size, 0);
+
+        for (int i = 0; i < num_part; i++)
+        {
+            int packed_pos = i / 32;
+            int bit_pos = i % 32;
+            packed_nf[packed_pos] += (neighbor_flags[i] << bit_pos);
+        }
+
+        // exchange packed neighbor flags
+        IVector_h gathered_packed_nf;
+        A.manager->getComms()->all_gather_v(packed_nf, gathered_packed_nf, num_part);
+        // assign neighbors that have edges to me
+        int my_id_pos = my_id / 32;
+        int my_id_bit = my_id % 32;
+
+        for (int i = 0; i < num_part; i++)
+            if (gathered_packed_nf[i * packed_size + my_id_pos] & (1 << my_id_bit)) // check my bit
+            {
+                neighbor_flags[i] = 1;
+            }
+
+        // compute total number of new neighbors
+        int new_neighbors = thrust::reduce(neighbor_flags.begin(), neighbor_flags.end());
+        cudaCheckError();
+        // save old size
+        int old_neighbors = P_neighbors.size();
+        P_neighbors.resize(old_neighbors + new_neighbors);
+        P_halo_ranges_h.resize(old_neighbors * 2 + new_neighbors * 2);
+        // initialize manager->neighbors and manager->halo_ranges_h for the new nodes
+        int active_part = old_neighbors;
+
+
+
+
+
+        // XXX NOT SURE WHAT THIS IS DOING
+        //prep->num_part = num_part;
+
+
+
+
+
+        for (int i = 0; i < num_part; i++)
+        {
+            if (neighbor_flags[i] > 0)
+            {
+                P_neighbors[active_part] = i;
+                P_halo_ranges_h[2 * active_part] = RAP.manager->part_offsets_h[i];
+                P_halo_ranges_h[2 * active_part + 1] = RAP.manager->part_offsets_h[i + 1];
+                active_part++;
+            }
+        }
+
+        P_halo_ranges.resize(old_neighbors * 2 + new_neighbors * 2);
+        thrust::copy(P_halo_ranges_h.begin() + old_neighbors * 2, P_halo_ranges_h.end(), P_halo_ranges.begin() + old_neighbors * 2);
+        cudaCheckError();
+
+        std::vector<IVector> dummy_boundary_list(0);
+        int current_num_rings = 1;
+        halo_rows_P_local_col_indices.resize(halo_rows_P_col_indices.size());
+        // Convert the global indices in the rows just received to local indices
+        // This function updates halo offsets, halo_rows_P_local_col_indices, local_to_global_map
+        // This should not modify the existing P manager
+        //prep->compute_local_halo_indices( P.row_offsets, P.col_indices, halo_rows_P_row_offsets, halo_rows_P_col_indices, halo_rows_P_local_col_indices, RAP.manager->local_to_global_map,  dummy_boundary_list, P_neighbors, P_halo_ranges_h, P_halo_ranges, P_halo_offsets, coarse_base_index, num_owned_coarse_pts, P.get_num_rows(), current_num_rings);
+        //compute_local_halo_indices( &A_row_offsets, &A_col_indices, &halo_row_offsets, &halo_global_indices, &halo_local_indices, &local_to_global, &boundary_lists, &neighbors, &halo_ranges_h, &halo_ranges, &halo_offsets, base_index, index_range, A_num_rows, current_num_rings)
+
+        int base_index = coarse_base_index;
+        int index_range = num_owned_coarse_pts;
+
+        // This function checks the halo_col_indices received from the neighbors, and identifies
+        // new halo_indices and  updates halo_offsets, local_to_global_map accordingly
+        // input: halo row offsets,
+        //        halo global column indices
+        //        current local to global map
+        //        neighbors (new discovered neighbors should already be included)
+        //        halo_ranges for the neighbors
+        //
+        // output: halo offsets,
+        //         halo local column indices,
+        //         updated local to global map (in place)
+        int size = P.get_num_rows();
+
+        //TODO: Are these the optimal block_sizes?
+        int num_blocks = min(4096, (size + 127) / 128);
+
+        // compute neighbor offsets & total number of neighbor rows
+        int total_rows_of_neighbors = 0;
+        std::vector<int> neighbor_offsets_h(num_neighbors + 1, 0);
+        int max_neighbor_size = 0;
+
+        for (int i = 0; i < num_neighbors; i ++)
+        {
+            total_rows_of_neighbors += P_halo_ranges_h[2 * i + 1] - P_halo_ranges_h[2 * i];
+            neighbor_offsets_h[i + 1] = neighbor_offsets_h[i] + P_halo_ranges_h[2 * i + 1] - P_halo_ranges_h[2 * i];
+            max_neighbor_size = max_neighbor_size > (P_halo_ranges_h[2 * i + 1] - P_halo_ranges_h[2 * i]) ? max_neighbor_size : (P_halo_ranges_h[2 * i + 1] - P_halo_ranges_h[2 * i]);
+        }
+
+        // copy offsets to device
+        IVector neighbor_offsets(num_neighbors + 1);
+        thrust::copy(neighbor_offsets_h.begin(), neighbor_offsets_h.end(), neighbor_offsets.begin());
+        // store flags for all neighbor nodes
+        IVector neighbor_nodes(total_rows_of_neighbors);
+        // flag neighbor nodes that are in the existing rings as -(local_index)-1
+        thrust::fill(neighbor_nodes.begin(), neighbor_nodes.end(), 0);
+        cudaCheckError();
+        int local_to_global_size = RAP.manager->local_to_global_map.size();
+        int num_blocks2 = min(4096, (local_to_global_size + 127) / 128);
+
+        if (local_to_global_size != 0)
+        {
+            flag_halo_nodes_local_v2_flat<<< num_blocks2, 128>>>(P_halo_ranges.raw(), neighbor_nodes.raw(), neighbor_offsets.raw(), base_index, index_range, num_neighbors, local_to_global_size, RAP.manager->local_to_global_map.raw());
+            cudaCheckError();
+        }
+
+        // 1) flag NEW neighbors nodes that I need as 1, they will be in the 2nd ring
+        // 2) fill out local indices for 1st ring & internal indices
+        int num_halos = halo_rows_P_row_offsets.size();
+
+        for (int i = 0; i < num_halos; i++)
+        {
+            int size = halo_rows_P_col_indices[i].size();
+
+            if (size > 0)
+            {
+                halo_rows_P_local_col_indices[i].resize(size);
+                thrust::fill(halo_rows_P_local_col_indices[i].begin(), halo_rows_P_local_col_indices[i].end(), -1); // fill with -1
+                // TODO: launch only on halo rows
+                flag_halo_nodes_global_flat<16, 1> <<< num_blocks, 128>>>(halo_rows_P_row_offsets[i].raw(), halo_rows_P_row_offsets[i].size() - 1, halo_rows_P_col_indices[i].raw(), P_halo_ranges.raw(), neighbor_nodes.raw(), neighbor_offsets.raw(), base_index, index_range, num_neighbors, halo_rows_P_local_col_indices[i].raw());
+            }
+        }
+
+        cudaCheckError();
+        // replace all negative values with 0 in neighbor flags
+        is_less_than_zero pred;
+        thrust::replace_if(neighbor_nodes.begin(), neighbor_nodes.end(), pred, 0);
+        cudaCheckError();
+        // fill halo offsets for the current number of  ring for new neighbors (it will be of size 0)
+        int current_num_neighbors = (P_halo_offsets.size() - 1) / current_num_rings;;
+        int num_rings = current_num_rings + 1;
+        IVector_h new_halo_offsets(num_rings * num_neighbors + 1);
+
+        for (int j = 0; j < current_num_rings; j++)
+        {
+            for (int i = 0 ; i <= current_num_neighbors; i++)
+            {
+                new_halo_offsets[num_neighbors * j + i] = P_halo_offsets[current_num_neighbors * j + i];
+            }
+
+            for (int i = current_num_neighbors; i < num_neighbors; i++)
+            {
+                new_halo_offsets[num_neighbors * j + i + 1] = new_halo_offsets[num_neighbors * j + i];
+            }
+        }
+
+        P_halo_offsets = new_halo_offsets;
+        int ring = current_num_rings;
+        int current_num_halo_indices = RAP.manager->local_to_global_map.size();
+        //int halo_base = index_range + current_num_halo_indices;
+        cudaCheckError();
+
+        // compute neighbors nodes indices (in-place) for each neighbor
+        for (int i = 0; i < num_neighbors; i++)
+        {
+            int last_node, num_halo;
+
+            if (neighbor_offsets_h[i + 1] != neighbor_offsets_h[i])
+            {
+                last_node = neighbor_nodes[neighbor_offsets_h[i + 1] - 1];
+                thrust_wrapper::exclusive_scan(neighbor_nodes.begin() + neighbor_offsets_h[i], neighbor_nodes.begin() + neighbor_offsets_h[i + 1], neighbor_nodes.begin() + neighbor_offsets_h[i]);
+                num_halo = neighbor_nodes[neighbor_offsets_h[i + 1] - 1] + last_node;
+            }
+            else
+            {
+                num_halo = 0;
+                last_node = 0;
+            }
+
+            // update halo offsets (L2H)
+            P_halo_offsets[ring * num_neighbors + i + 1] = P_halo_offsets[ring * num_neighbors + i] + num_halo;
+
+            // if size = 0 then we don't need to compute it
+            if (dummy_boundary_list.size() > 0)
+            {
+                // create my boundary lists = list of neighbor inner nodes corresponding to halo numbers 0..M
+                // basically this will be our 2-ring B2L_maps
+                dummy_boundary_list[i].resize(num_halo);
+                int size = neighbor_offsets_h[i + 1] - neighbor_offsets_h[i];
+                num_blocks = min(4096, (size + 127) / 128);
+
+                if (size > 0)
+                {
+                    populate_B2L_flat<<< num_blocks, 128>>>(neighbor_nodes.raw() + neighbor_offsets_h[i], dummy_boundary_list[i].raw(), last_node, size);
+                    cudaCheckError();
+                }
+            }
+        }
+
+        cudaCheckError();
+        // compute local indices and new local to global mapping
+        int new_num_halo_indices = P_halo_offsets[num_rings * num_neighbors] - P_halo_offsets[current_num_rings * num_neighbors];
+        RAP.manager->local_to_global_map.resize(current_num_halo_indices + new_num_halo_indices);
+        IVector halo_offsets_d(P_halo_offsets.size());
+        thrust::copy(P_halo_offsets.begin(), P_halo_offsets.end(), halo_offsets_d.begin());
+        cudaCheckError();
+
+        // do this for all ring-1 neighbors
+        for (int i = 0; i < num_halos; i++)
+        {
+            int num_neighbor_rows = halo_rows_P_row_offsets[i].size() - 1;
+            num_blocks = min(4096, (num_neighbor_rows + 127) / 128);
+
+            if (num_blocks > 0)
+            {
+                calc_new_halo_mapping_ring2_flat<16> <<< num_blocks, 128>>>(
+                    halo_rows_P_row_offsets[i].raw(), num_neighbor_rows, halo_rows_P_col_indices[i].raw(),                     // halo rows to process
+                    P_halo_ranges.raw(), base_index, index_range, num_neighbors,                          // ranges and # of neighbors
+                    halo_offsets_d.raw() + current_num_rings * num_neighbors, neighbor_offsets.raw(), neighbor_nodes.raw(),     // halo offsets, neighbor offsets and indices
+                    RAP.manager->local_to_global_map.raw(), halo_rows_P_local_col_indices[i].raw());                                    // output
+            }
+        }
+
+        cudaCheckError();
+
+        // Append the new rows to the matrix P
+        P.set_initialized(0);
+        prep->append_halo_rows(P, halo_rows_P_row_offsets, halo_rows_P_local_col_indices, halo_rows_P_values);
+        P.set_initialized(1);
+    #endif
+
+    cudaCheckError();
+    // At this point, we can compute RAP_full which contains some rows that will need to be sent to neighbors
+    // i.e. RAP_full = [ RAP_int ]
+    //                 [ RAP_ext ]
+    // RAP is [ RAP_int ] + [RAP_ext_received_from_neighbors]
+    // We can reuse the serial galerkin product since R, A and P use local indices
+    // TODO: latency hiding (i.e. compute RAP_ext, exchange_matrix_halo, then do RAP_int)
+    /* WARNING: do not recompute prolongation (P) and restriction (R) when you
+                are reusing the level structure (structure_reuse_levels > 0) */
+    /* We force for matrix P to have only owned rows to be seen for the correct galerkin product computation*/
+    P.set_initialized(0);
+    P.set_num_rows(num_owned_fine_pts);
+    P.addProps( CSR );
+    P.set_initialized(1);
+
+    if (this->isReuseLevel() == false)
+    {
+        this->R.set_initialized( 0 );
+        this->R.addProps( CSR );
+        // Take the tranpose of P to get R
+        // Single-GPU transpose, no mpi exchange
+        this->computeRestrictionOperator();
+        this->R.set_initialized( 1 );
+    }
+
+    Matrix<TConfig_d> RAP_full;
+    // Initialize the workspace needed for galerkin product
+    void *wk = AMG_Level<TConfig_d>::amg->getCsrWorkspace();
+
+    if ( wk == NULL )
+    {
+        wk = CSR_Multiply<TConfig_d>::csr_workspace_create( *(AMG_Level<TConfig_d>::amg->m_cfg), AMG_Level<TConfig_d>::amg->m_cfg_scope );
+        AMG_Level<TConfig_d>::amg->setCsrWorkspace( wk );
+    }
+
+    // Single-GPU RAP, no mpi exchange
+    RAP_full.set_initialized( 0 );
+    /* WARNING: Since A is reordered (into interior and boundary nodes), while R and P are not reordered,
+                you must unreorder A when performing R*A*P product in ordre to obtain the correct result. */
+    CSR_Multiply<TConfig_d>::csr_galerkin_product( this->R, this->getA(), this->P, RAP_full,
+            /* permutation for rows of R, A and P */       NULL, NULL /*&(this->getA().manager->renumbering)*/,        NULL,
+            /* permutation for cols of R, A and P */       NULL, NULL /*&(this->getA().manager->inverse_renumbering)*/, NULL,
+            wk );
+    RAP_full.set_initialized( 1 );
+    this->Profile.toc("computeA");
+    // ----------------------------------------------------------------------------------------------
+    // Now, send rows of RAP_full requireq by neighbors, received rows from neighbors and create RAP
+    // ----------------------------------------------------------------------------------------------
+    prep->exchange_RAP_ext(RAP, RAP_full, A, this->P, P_halo_offsets, RAP.manager->local_to_global_map, P_neighbors, P_halo_ranges_h, P_halo_ranges, RAP.manager->part_offsets_h, RAP.manager->part_offsets, num_owned_coarse_pts, RAP.manager->part_offsets_h[my_rank], wk);
+    // Delete temporary distributed arranger
+    delete prep;
+
+    /* WARNING: The RAP matrix generated at this point contains extra rows (that correspond to rows of R,
+       that was obtained by locally transposing P). This rows are ignored by setting the # of matrix rows
+       to be smaller, so that they correspond to number of owned coarse nodes. This should be fine, but
+       it leaves holes in the matrix as there might be columns that belong to the extra rows that now do not
+       belong to the smaller matrix with number of owned coarse nodes rows. The same is trued about the
+       local_to_global_map. These two data structures match at this point. However, in the next calls
+       local_to_global (exclusively) will be used to geberate B2L_maps (wihtout going through column indices)
+       which creates extra elements in the B2L that simply do not exist in the new matrices. I strongly suspect
+       this is the reason fore the bug. The below fix simply compresses the matrix so that there are no holes
+       in it, or in the local_2_global_map. */
+    //mark local_to_global_columns that exist in the owned coarse nodes rows.
+    IndexType nrow = RAP.get_num_rows();
+    IndexType ncol = RAP.get_num_cols();
+    IndexType nl2g = ncol - nrow;
+
+    if (nl2g > 0)
+    {
+        IVector   l2g_p(nl2g + 1, 0); //+1 is needed for prefix_sum/exclusive_scan
+        I64Vector l2g_t(nl2g, 0);
+        IndexType nblocks = (nrow + AMGX_CAL_BLOCK_SIZE - 1) / AMGX_CAL_BLOCK_SIZE;
+
+        if (nblocks > 0)
+            flag_existing_local_to_global_columns<int> <<< nblocks, AMGX_CAL_BLOCK_SIZE>>>
+            (nrow, RAP.row_offsets.raw(), RAP.col_indices.raw(), l2g_p.raw());
+
+        cudaCheckError();
+        /*
+        //slow version of the above kernel
+        for(int ii=0; ii<nrow; ii++){
+            int s = RAP.row_offsets[ii];
+            int e = RAP.row_offsets[ii+1];
+            for (int jj=s; jj<e; jj++) {
+                int col = RAP.col_indices[jj];
+                if (col>=nrow){
+                    int kk = col-RAP.get_num_rows();
+                    l2g_p[kk] = 1;
+                }
+            }
+        }
+        cudaCheckError();
+        */
+        //create a pointer map for their location using prefix sum
+        thrust_wrapper::exclusive_scan(l2g_p.begin(), l2g_p.end(), l2g_p.begin());
+        int new_nl2g = l2g_p[nl2g];
+
+        //compress the columns using the pointer map
+        if (nblocks > 0)
+            compress_existing_local_columns<int> <<< nblocks, AMGX_CAL_BLOCK_SIZE>>>
+            (nrow, RAP.row_offsets.raw(), RAP.col_indices.raw(), l2g_p.raw());
+
+        cudaCheckError();
+        /*
+        //slow version of the above kernel
+        for(int ii=0; ii<nrow; ii++){
+            int s = RAP.row_offsets[ii];
+            int e = RAP.row_offsets[ii+1];
+            for (int jj=s; jj<e; jj++) {
+                int col = RAP.col_indices[jj];
+                if (col>=nrow){
+                    int kk = col-RAP.get_num_rows();
+                    RAP.col_indices[jj] = nrow+l2g_p[kk];
+                }
+            }
+        }
+        cudaCheckError();
+        */
+        //adjust matrix size (number of columns) accordingly
+        RAP.set_initialized(0);
+        RAP.set_num_cols(nrow + new_nl2g);
+        RAP.set_initialized(1);
+        //compress local_to_global_map using the pointer map
+        nblocks = (nl2g + AMGX_CAL_BLOCK_SIZE - 1) / AMGX_CAL_BLOCK_SIZE;
+
+        if (nblocks > 0)
+            compress_existing_local_to_global_columns<int, int64_t> <<< nblocks, AMGX_CAL_BLOCK_SIZE>>>
+            (nl2g, RAP.manager->local_to_global_map.raw(), l2g_t.raw(), l2g_p.raw());
+
+        cudaCheckError();
+        thrust::copy(l2g_t.begin(), l2g_t.begin() + new_nl2g, RAP.manager->local_to_global_map.begin());
+        cudaCheckError();
+        /*
+        //slow version of the above kernel (through Thrust)
+        for(int ii=0; ii<(l2g_p.size()-1); ii++){
+            if (l2g_p[ii] != l2g_p[ii+1]){
+                RAP.manager->local_to_global_map[l2g_p[ii]] = RAP.manager->local_to_global_map[ii];
+            }
+        }
+        cudaCheckError();
+        */
+        //adjust local_to_global_map size accordingly
+        RAP.manager->local_to_global_map.resize(new_nl2g);
+    }
+
+    // we also need to renumber columns of P and rows or R correspondingly since we changed RAP halo columns
+    // for R we just keep track of renumbering in and exchange proper vectors in restriction
+    // for P we actually need to renumber columns for prolongation:
+    if (A.is_matrix_distributed() && this->A->manager->get_num_partitions() > 1)
+    {
+        RAP.set_initialized(0);
+        // Renumber the owned nodes as interior and boundary (renumber rows and columns)
+        // We are passing reuse flag to not create neighbours list from scratch, but rather update based on new halos
+        RAP.manager->renumberMatrixOneRing(this->isReuseLevel());
+        // Renumber the column indices of P and shuffle rows of P
+        RAP.manager->renumber_P_R(this->P, this->R, A);
+        // Create the B2L_maps for RAP
+        {
+            nvtxRange fdafds("createOneRingHaloRows RAP");
+            RAP.manager->createOneRingHaloRows();
+        }
+        RAP.manager->getComms()->set_neighbors(RAP.manager->num_neighbors());
+        RAP.setView(OWNED);
+        RAP.set_initialized(1);
+        // update # of columns in P - this is necessary for correct CSR multiply
+        this->P.set_initialized(0);
+        int new_num_cols = thrust_wrapper::reduce(this->P.col_indices.begin(), this->P.col_indices.end(), int(0), thrust::maximum<int>()) + 1;
+        cudaCheckError();
+        this->P.set_num_cols(new_num_cols);
+        this->P.set_initialized(1);
+    }
+
+    RAP.copyAuxData(&A);
+
+    if (!A.is_matrix_singleGPU() && RAP.manager == NULL)
+    {
+        RAP.manager = new DistributedManager<TConfig_d>();
+    }
+
+    if (this->getA().is_matrix_singleGPU())
+    {
+        this->m_next_level_size = this->getNextLevel(typename Matrix<TConfig_d>::memory_space() )->getA().get_num_rows() * this->getNextLevel(typename Matrix<TConfig_d>::memory_space() )->getA().get_block_dimy();
+    }
+    else
+    {
+        // m_next_level_size is the size that will be used to allocate xc, bc vectors
+        int size, offset;
+        this->getNextLevel(typename Matrix<TConfig_d>::memory_space())->getA().getOffsetAndSizeForView(FULL, &offset, &size);
+        this->m_next_level_size = size * this->getNextLevel(typename Matrix<TConfig_d>::memory_space() )->getA().get_block_dimy();
+    }
+
+    printf("FLATTERNED COMPLETE\n");
+}
+
+
+
+
+
+
 
 /****************************************
  * Explict instantiations
