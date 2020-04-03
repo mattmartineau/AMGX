@@ -42,6 +42,7 @@
 #include <csr_multiply.h>
 #include <algorithm>
 #include <thrust_wrapper.h>
+#include <amgx_timer.h>
 
 #include <amgx_types/util.h>
 
@@ -2888,6 +2889,8 @@ void DistributedArranger<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
 template <AMGX_VecPrecision t_vecPrec, AMGX_MatPrecision t_matPrec, AMGX_IndPrecision t_indPrec>
 void DistributedArranger<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indPrec> >::pack_halo_rows_P(Matrix_d &A, Matrix_d &P, std::vector<IVector> &halo_rows_P_row_offsets, std::vector<I64Vector> &halo_rows_P_col_indices, std::vector<MVector> &halo_rows_P_values, I64Vector &RAP_local_to_global_map, index_type num_owned_coarse_pts, int64_t coarse_base_index)
 {
+    nvtxRange nvtx_phrP(__func__);
+
     int num_neighbors = A.manager->num_neighbors();
     halo_rows_P_row_offsets.resize(num_neighbors);
     halo_rows_P_col_indices.resize(num_neighbors);
@@ -2939,6 +2942,7 @@ void DistributedArranger<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
 template <AMGX_VecPrecision t_vecPrec, AMGX_MatPrecision t_matPrec, AMGX_IndPrecision t_indPrec>
 void DistributedArranger<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indPrec> >::pack_halo_rows_RAP(Matrix_d &RAP, Matrix_d &P, std::vector<IVector> &halo_rows_RAP_row_offsets, std::vector<I64Vector> &halo_rows_RAP_col_indices, std::vector<MVector> &halo_rows_RAP_values, std::vector<I64Vector> &halo_rows_RAP_row_ids, I64Vector &RAP_local_to_global_map)
 {
+    nvtxRange nvtx_phrRAP(__func__);
     int num_neighbors = P.manager->neighbors.size();
     int num_owned_coarse_pts = P.manager->halo_offsets[0];
     int64_t P_col_base_index = P.manager->base_index();

@@ -29,6 +29,7 @@
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust_wrapper.h>
 #include <amgx_types/util.h>
+#include <amgx_timer.h>
 
 namespace amgx
 {
@@ -737,7 +738,11 @@ AMGX_ERROR DistributedRead<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_i
             A.set_initialized(0);
             A.manager->neighbors.resize(0);
             A.manager->renumberMatrixOneRing();
+
+        {
+            nvtxRange fdafds("createOneRingHaloRows Aio");
             A.manager->createOneRingHaloRows();
+        }
             A.manager->getComms()->set_neighbors(A.manager->num_neighbors());
             A.setView(OWNED);
             A.set_initialized(1);

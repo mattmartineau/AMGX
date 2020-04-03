@@ -1697,6 +1697,7 @@ inline AMGX_RC generate_distributed_poisson_7pt(AMGX_matrix_handle mtx,
     /* Exchange 1 ring halo rows (for d2 interp) */
     if (num_import_rings == 2)
     {
+        nvtxRange fudfdsfdas("createOneRingHaloRows");
         A_part.manager->createOneRingHaloRows();
     }
 
@@ -1747,10 +1748,10 @@ inline AMGX_RC matrix_upload_distributed(AMGX_matrix_handle mtx,
 
     A_part.manager = new DistributedManager<TConfig>(A_part);
     A_part.setManagerExternal();
-    /* Load distributed matrix 
+    /* Load distributed matrix
         Choose correct overload based on column index type
      */
-    if (mdist.get32BitColIndices()) 
+    if (mdist.get32BitColIndices())
     {
         A_part.manager->loadDistributedMatrix(n, nnz, block_dimx, block_dimy, row_ptrs, (int *)col_indices_global,
             (ValueType *)data, num_ranks, n_global, diag_data, mdist);
@@ -1766,7 +1767,10 @@ inline AMGX_RC matrix_upload_distributed(AMGX_matrix_handle mtx,
     /* Exchange 1 ring halo rows (for d2 interp) */
     if (mdist.getNumImportRings() == 2)
     {
-        A_part.manager->createOneRingHaloRows();
+        {
+            nvtxRange fdafds("createOneRingHaloRows Amud");
+            A_part.manager->createOneRingHaloRows();
+        }
     }
 
     A_part.manager->getComms()->set_neighbors(A_part.manager->num_neighbors());
@@ -1805,7 +1809,7 @@ inline AMGX_RC matrix_upload_all_global(AMGX_matrix_handle mtx,
 }
 
 template<AMGX_Mode CASE>
-inline AMGX_RC matrix_upload_all_global_32(AMGX_matrix_handle mtx, 
+inline AMGX_RC matrix_upload_all_global_32(AMGX_matrix_handle mtx,
                                            int n_global,
                                            int n,
                                            int nnz,
@@ -1829,7 +1833,7 @@ inline AMGX_RC matrix_upload_all_global_32(AMGX_matrix_handle mtx,
     auto rc = matrix_upload_distributed<CASE>(mtx, n_global, n, nnz, block_dimx, block_dimy, row_ptrs, col_indices_global,
         data, diag_data, dist);
     AMGX_distribution_destroy(dist);
-    return rc;    
+    return rc;
 }
 #endif
 
@@ -4642,8 +4646,8 @@ extern "C" {
 
         AMGX_CATCHES(rc)
         return AMGX_OK != rc ? getCAPIerror_x(rc) : rc0;
-    }   
-    
+    }
+
     AMGX_RC AMGX_API AMGX_matrix_upload_distributed(AMGX_matrix_handle mtx,
             int n_global,
             int n,
@@ -4856,7 +4860,7 @@ extern "C" {
         nvtxRange nvrf(__func__);
 
         AMGX_ERROR rc = AMGX_OK;
-        try 
+        try
         {
             auto *mdist = create_managed_object<MatrixDistribution, AMGX_distribution_handle>(dist);
             if (cfg != NULL)
@@ -4882,7 +4886,7 @@ extern "C" {
         AMGX_ERROR rc = AMGX_OK;
         try
         {
-            if (!remove_managed_object<AMGX_distribution_handle, MatrixDistribution>(dist)) 
+            if (!remove_managed_object<AMGX_distribution_handle, MatrixDistribution>(dist))
             {
                 rc = AMGX_ERR_BAD_PARAMETERS;
             }
@@ -4899,7 +4903,7 @@ extern "C" {
     {
         nvtxRange nvrf(__func__);
 
-        if (dist == NULL || partition_data == NULL) 
+        if (dist == NULL || partition_data == NULL)
         {
             AMGX_CHECK_API_ERROR(AMGX_ERR_BAD_PARAMETERS, NULL);
         }

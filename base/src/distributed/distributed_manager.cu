@@ -1377,11 +1377,11 @@ void DistributedManager<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indP
     using PI = MatrixDistribution::PartitionInformation;
     switch (dist.getPartitionInformationStyle()) {
         case PI::PartitionVec:
-            loadDistributedMatrixPartitionVec(num_rows, num_nonzeros, block_dimx, block_dimy, 
+            loadDistributedMatrixPartitionVec(num_rows, num_nonzeros, block_dimx, block_dimy,
                 row_offsets, col_indices, values, num_ranks, num_rows_global, diag, (const int*) dist.getPartitionData());
             break;
         case PI::PartitionOffsets:
-            loadDistributedMatrixPartitionOffsets(num_rows, num_nonzeros, block_dimx, block_dimy, 
+            loadDistributedMatrixPartitionOffsets(num_rows, num_nonzeros, block_dimx, block_dimy,
                 row_offsets, col_indices, values, num_ranks, num_rows_global, diag, (const t_colIndex*) dist.getPartitionData());
             break;
         default:
@@ -1608,7 +1608,7 @@ void DistributedManager<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indP
     DistributedArranger<TConfig_d> *prep = new DistributedArranger<TConfig_d>;
     prep->create_one_ring_halo_rows(*(this->A));
     // I believe this can be removed since we don't use masked SpMV anymore
-    prep->createRowsLists(*(this->A), false);
+    //prep->createRowsLists(*(this->A), false);
     delete prep;
     // this is not necessary anymore becasue we don't use latency hiding
     // however in future we might want to get back to this in case we want to use latency hiding
@@ -5604,7 +5604,7 @@ void DistributedManager<TemplateConfig<AMGX_host, t_vecPrec, t_matPrec, t_indPre
 template <AMGX_VecPrecision t_vecPrec, AMGX_MatPrecision t_matPrec, AMGX_IndPrecision t_indPrec>
 template <typename t_colIndex>
 void DistributedManager<TemplateConfig<AMGX_host, t_vecPrec, t_matPrec, t_indPrec> >::loadDistributedMatrix(
-    int num_rows, int num_nonzeros, const int block_dimx, const int block_dimy, const int *row_offsets, 
+    int num_rows, int num_nonzeros, const int block_dimx, const int block_dimy, const int *row_offsets,
     const t_colIndex *col_indices, const mat_value_type *values, int num_ranks, int num_rows_global, const void *diag, const MatrixDistribution &dist)
 {
     FatalError("loadDistributedMatrix only implemented on devices", AMGX_ERR_NOT_IMPLEMENTED);

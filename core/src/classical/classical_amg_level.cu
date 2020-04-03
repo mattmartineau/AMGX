@@ -337,7 +337,10 @@ void Classical_AMG_Level_Base<T_Config>::createCoarseMatrices()
         // Renumber the column indices of P and shuffle rows of P
         RAP.manager->renumber_P_R(this->P, this->R, A);
         // Create the B2L_maps for RAP
-        RAP.manager->createOneRingHaloRows();
+        {
+            nvtxRange fdafds("createOneRingHaloRows RAP");
+            RAP.manager->createOneRingHaloRows();
+        }
         RAP.manager->getComms()->set_neighbors(RAP.manager->num_neighbors());
         RAP.setView(OWNED);
         RAP.set_initialized(1);

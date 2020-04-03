@@ -513,7 +513,10 @@ int upload_matrix_after_glue(int n, int nnz, int *r_ptr, int *i_ptr, void *v_ptr
     // WARNING WE SHOULD GET THE NUMBER OF RINGS AND DO THE FOLLOWING ONLY IF THERE ARE 2 RINGS
     // Exchange 1 ring halo rows (for d2 interp)
     // if (num_import_rings == 2)
-    nv_mtx.manager->createOneRingHaloRows();
+    {
+            nvtxRange fdafds("createOneRingHaloRows nv_mtx");
+        nv_mtx.manager->createOneRingHaloRows();
+        }
     nv_mtx.manager->getComms()->set_neighbors(nv_mtx.manager->num_neighbors());
     nv_mtx.setView(OWNED);
     nv_mtx.set_initialized(1);

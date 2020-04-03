@@ -324,22 +324,29 @@ int main(int argc, char **argv)
     /* upload the vector (and the connectivity information) */
     AMGX_vector_upload(x, n, 1, h_x);
     AMGX_vector_upload(b, n, 1, h_b);
-    /* solver setup */
-    //MPI barrier for stability (should be removed in practice to maximize performance)
-    MPI_Barrier(amgx_mpi_comm);
-    AMGX_solver_setup(solver, A);
-    /* solver solve */
-    //MPI barrier for stability (should be removed in practice to maximize performance)
-    MPI_Barrier(amgx_mpi_comm);
-    AMGX_solver_solve(solver, b, x);
-    /* example of how to change parameters between non-linear iterations */
-    //AMGX_config_add_parameters(&cfg, "config_version=2, default:tolerance=1e-12");
-    //AMGX_solver_solve(solver, b, x);
-    /* example of how to replace coefficients between non-linear iterations */
-    //AMGX_matrix_replace_coefficients(A, n, nnz, values, diag);
-    //AMGX_solver_setup(solver, A);
-    //AMGX_solver_solve(solver, b, x);
-    AMGX_solver_get_status(solver, &status);
+
+    int niter_index = findParamIndex(argv, argc, "-n");
+    int niters = (niter_index == -1) ? 1 : atoi(argv[niter_index + 1]);
+
+    for(int n = 0; n < niters; ++n)
+    {
+        /* solver setup */
+        //MPI barrier for stability (should be removed in practice to maximize performance)
+        MPI_Barrier(amgx_mpi_comm);
+        AMGX_solver_setup(solver, A);
+        /* solver solve */
+        //MPI barrier for stability (should be removed in practice to maximize performance)
+        MPI_Barrier(amgx_mpi_comm);
+        AMGX_solver_solve(solver, b, x);
+        /* example of how to change parameters between non-linear iterations */
+        //AMGX_config_add_parameters(&cfg, "config_version=2, default:tolerance=1e-12");
+        //AMGX_solver_solve(solver, b, x);
+        /* example of how to replace coefficients between non-linear iterations */
+        //AMGX_matrix_replace_coefficients(A, n, nnz, values, diag);
+        //AMGX_solver_setup(solver, A);
+        //AMGX_solver_solve(solver, b, x);
+        AMGX_solver_get_status(solver, &status);
+    }
     /* example of how to get (the local part of) the solution */
     //int sizeof_v_val;
     //sizeof_v_val = ((NVAMG_GET_MODE_VAL(NVAMG_VecPrecision, mode) == NVAMG_vecDouble))? sizeof(double): sizeof(float);
