@@ -278,22 +278,30 @@ void Classical_AMG_Level_Base<T_Config>::createCoarseVertices()
     markCoarseFinePoints();
 }
 
-template <class T_Config>
-void Classical_AMG_Level_Base<T_Config>::createCoarseMatrices()
+template <AMGX_VecPrecision t_vecPrec, AMGX_MatPrecision t_matPrec, AMGX_IndPrecision t_indPrec>
+void Classical_AMG_Level<TemplateConfig<AMGX_host, t_vecPrec, t_matPrec, t_indPrec> >::createCoarseMatricesFlattened()
 {
+}
+
+template <AMGX_VecPrecision t_vecPrec, AMGX_MatPrecision t_matPrec, AMGX_IndPrecision t_indPrec>
+void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indPrec> >::createCoarseMatricesFlattened()
+{
+    #if 0
     // allocate aggressive interpolator if needed
-    if (AMG_Level<T_Config>::getLevelIndex() < this->num_aggressive_levels)
+    if (AMG_Level<TConfig_d>::getLevelIndex() < this->num_aggressive_levels)
     {
-        if (interpolator) { delete interpolator; }
+        if (this->interpolator) { delete this->interpolator; }
 
-        interpolator = chooseAggressiveInterpolator<T_Config>(AMG_Level<T_Config>::amg->m_cfg, AMG_Level<T_Config>::amg->m_cfg_scope);
+        this->interpolator = chooseAggressiveInterpolator<TConfig_d>(AMG_Level<TConfig_d>::amg->m_cfg, AMG_Level<TConfig_d>::amg->m_cfg_scope);
     }
+    #endif
 
-    Matrix<T_Config> &RAP = this->getNextLevel( typename Matrix<T_Config>::memory_space( ) )->getA( );
-    Matrix<T_Config> &A = this->getA();
+    Matrix<TConfig_d> &RAP = this->getNextLevel( typename Matrix<TConfig_d>::memory_space( ) )->getA( );
+    Matrix<TConfig_d> &A = this->getA();
+    Matrix<TConfig_d> &P = this->P;
     /* WARNING: exit if D1 interpolator is selected in distributed setting */
     std::string s("");
-    s += AMG_Level<T_Config>::amg->m_cfg->AMG_Config::getParameter<std::string>("interpolator", AMG_Level<T_Config>::amg->m_cfg_scope);
+    s += AMG_Level<TConfig_d>::amg->m_cfg->AMG_Config::getParameter<std::string>("interpolator", AMG_Level<TConfig_d>::amg->m_cfg_scope);
 
     if (A.is_matrix_distributed() && (s.compare("D1") == 0))
     {
@@ -304,30 +312,218 @@ void Classical_AMG_Level_Base<T_Config>::createCoarseMatrices()
                 are reusing the level structure (structure_reuse_levels > 0) */
     if (this->isReuseLevel() == false)
     {
-        computeProlongationOperator();
-    }
+        //generate the interpolation matrix
+        this->interpolator->generateInterpolationMatrix(A, this->m_cf_map, this->m_s_con, this->m_scratch, P, AMG_Level<TConfig_d>::amg);
 
-    // Compute Restriction operator and coarse matrix Ac
-    if (!this->A->is_matrix_distributed() || this->A->manager->get_num_partitions() == 1)
-    {
-        /* WARNING: see above warning. */
-        if (this->isReuseLevel() == false)
+        this->m_cf_map.clear();
+        this->m_cf_map.shrink_to_fit();
+        this->m_scratch.clear();
+        this->m_scratch.shrink_to_fit();
+        this->m_s_con.clear();
+        this->m_s_con.shrink_to_fit();
+
+        // truncate based on max # of elements if desired
+        if (this->max_elmts > 0 && P.get_num_rows() > 0)
         {
-            computeRestrictionOperator();
+            Truncate<TConfig_d>::truncateByMaxElements(P, this->max_elmts);
         }
 
-        computeAOperator();
-    }
-    else
-    {
-        /* WARNING: notice that in this case the computeRestructionOperator() is called
-                    inside computeAOperator_distributed() routine. */
-        computeAOperator_distributed();
+        if (this->m_min_rows_latency_hiding < 0 || P.get_num_rows() < this->m_min_rows_latency_hiding)
+        {
+            // This will cause bsrmv_with_mask to not do latency hiding
+            P.setInteriorView(OWNED);
+            P.setExteriorView(OWNED);
+        }
     }
 
-// we also need to renumber columns of P and rows or R correspondingly since we changed RAP halo columns
-// for R we just keep track of renumbering in and exchange proper vectors in restriction
-// for P we actually need to renumber columns for prolongation:
+    RAP.addProps(CSR);
+    RAP.set_block_dimx(this->getA().get_block_dimx());
+    RAP.set_block_dimy(this->getA().get_block_dimy());
+    IndexType num_parts = A.manager->get_num_partitions();
+    IndexType num_neighbors = A.manager->num_neighbors();
+    IndexType my_rank = A.manager->global_id();
+    // OWNED includes interior and boundary
+    A.setView(OWNED);
+    int num_owned_coarse_pts = P.manager->halo_offsets[0];
+    int num_owned_fine_pts = A.manager->halo_offsets[0];
+
+    // Initialize RAP.manager
+    if (RAP.manager == NULL)
+    {
+        RAP.manager = new DistributedManager<TConfig_d>();
+    }
+
+    RAP.manager->A = &RAP;
+    RAP.manager->setComms(A.manager->getComms());
+    RAP.manager->set_global_id(my_rank);
+    RAP.manager->set_num_partitions(num_parts);
+    RAP.manager->part_offsets_h = P.manager->part_offsets_h;
+    RAP.manager->part_offsets = P.manager->part_offsets;
+    RAP.manager->set_base_index(RAP.manager->part_offsets_h[my_rank]);
+    RAP.manager->set_index_range(num_owned_coarse_pts);
+    RAP.manager->num_rows_global = RAP.manager->part_offsets_h[num_parts];
+    // --------------------------------------------------------------------
+    // Using the B2L_maps of matrix A, identify the rows of P that need to be sent to neighbors,
+    // so that they can compute A*P
+    // Once rows of P are identified, convert the column indices to global indices, and send them to neighbors
+    //  ---------------------------------------------------------------------------
+    // Copy some information about the manager of P, since we don't want to modify those
+    IVector_h P_neighbors = P.manager->neighbors;
+    I64Vector_h P_halo_ranges_h = P.manager->halo_ranges_h;
+    I64Vector_d P_halo_ranges = P.manager->halo_ranges;
+    RAP.manager->local_to_global_map = P.manager->local_to_global_map;
+    IVector_h P_halo_offsets = P.manager->halo_offsets;
+    // Create a temporary distributed arranger
+    DistributedArranger<TConfig_d> *prep = new DistributedArranger<TConfig_d>;
+    prep->exchange_halo_rows_P(A, P, RAP.manager->local_to_global_map, P_neighbors, P_halo_ranges_h, P_halo_ranges, P_halo_offsets, RAP.manager->part_offsets_h, RAP.manager->part_offsets, num_owned_coarse_pts, RAP.manager->part_offsets_h[my_rank]);
+    cudaCheckError();
+    // At this point, we can compute RAP_full which contains some rows that will need to be sent to neighbors
+    // i.e. RAP_full = [ RAP_int ]
+    //                 [ RAP_ext ]
+    // RAP is [ RAP_int ] + [RAP_ext_received_from_neighbors]
+    // We can reuse the serial galerkin product since R, A and P use local indices
+    // TODO: latency hiding (i.e. compute RAP_ext, exchange_matrix_halo, then do RAP_int)
+    /* WARNING: do not recompute prolongation (P) and restriction (R) when you
+                are reusing the level structure (structure_reuse_levels > 0) */
+    /* We force for matrix P to have only owned rows to be seen for the correct galerkin product computation*/
+    P.set_initialized(0);
+    P.set_num_rows(num_owned_fine_pts);
+    P.addProps( CSR );
+    P.set_initialized(1);
+
+    if (this->isReuseLevel() == false)
+    {
+        this->R.set_initialized( 0 );
+        this->R.addProps( CSR );
+        // Take the tranpose of P to get R
+        // Single-GPU transpose, no mpi exchange
+        this->computeRestrictionOperator();
+        this->R.set_initialized( 1 );
+    }
+
+    Matrix<TConfig_d> RAP_full;
+    // Initialize the workspace needed for galerkin product
+    void *wk = AMG_Level<TConfig_d>::amg->getCsrWorkspace();
+
+    if ( wk == NULL )
+    {
+        wk = CSR_Multiply<TConfig_d>::csr_workspace_create( *(AMG_Level<TConfig_d>::amg->m_cfg), AMG_Level<TConfig_d>::amg->m_cfg_scope );
+        AMG_Level<TConfig_d>::amg->setCsrWorkspace( wk );
+    }
+
+    // Single-GPU RAP, no mpi exchange
+    RAP_full.set_initialized( 0 );
+    /* WARNING: Since A is reordered (into interior and boundary nodes), while R and P are not reordered,
+                you must unreorder A when performing R*A*P product in ordre to obtain the correct result. */
+    CSR_Multiply<TConfig_d>::csr_galerkin_product( this->R, this->getA(), this->P, RAP_full,
+            /* permutation for rows of R, A and P */       NULL, NULL /*&(this->getA().manager->renumbering)*/,        NULL,
+            /* permutation for cols of R, A and P */       NULL, NULL /*&(this->getA().manager->inverse_renumbering)*/, NULL,
+            wk );
+    RAP_full.set_initialized( 1 );
+    this->Profile.toc("computeA");
+    // ----------------------------------------------------------------------------------------------
+    // Now, send rows of RAP_full requireq by neighbors, received rows from neighbors and create RAP
+    // ----------------------------------------------------------------------------------------------
+    prep->exchange_RAP_ext(RAP, RAP_full, A, this->P, P_halo_offsets, RAP.manager->local_to_global_map, P_neighbors, P_halo_ranges_h, P_halo_ranges, RAP.manager->part_offsets_h, RAP.manager->part_offsets, num_owned_coarse_pts, RAP.manager->part_offsets_h[my_rank], wk);
+    // Delete temporary distributed arranger
+    delete prep;
+
+    /* WARNING: The RAP matrix generated at this point contains extra rows (that correspond to rows of R,
+       that was obtained by locally transposing P). This rows are ignored by setting the # of matrix rows
+       to be smaller, so that they correspond to number of owned coarse nodes. This should be fine, but
+       it leaves holes in the matrix as there might be columns that belong to the extra rows that now do not
+       belong to the smaller matrix with number of owned coarse nodes rows. The same is trued about the
+       local_to_global_map. These two data structures match at this point. However, in the next calls
+       local_to_global (exclusively) will be used to geberate B2L_maps (wihtout going through column indices)
+       which creates extra elements in the B2L that simply do not exist in the new matrices. I strongly suspect
+       this is the reason fore the bug. The below fix simply compresses the matrix so that there are no holes
+       in it, or in the local_2_global_map. */
+    //mark local_to_global_columns that exist in the owned coarse nodes rows.
+    IndexType nrow = RAP.get_num_rows();
+    IndexType ncol = RAP.get_num_cols();
+    IndexType nl2g = ncol - nrow;
+
+    if (nl2g > 0)
+    {
+        IVector   l2g_p(nl2g + 1, 0); //+1 is needed for prefix_sum/exclusive_scan
+        I64Vector l2g_t(nl2g, 0);
+        IndexType nblocks = (nrow + AMGX_CAL_BLOCK_SIZE - 1) / AMGX_CAL_BLOCK_SIZE;
+
+        if (nblocks > 0)
+            flag_existing_local_to_global_columns<int> <<< nblocks, AMGX_CAL_BLOCK_SIZE>>>
+            (nrow, RAP.row_offsets.raw(), RAP.col_indices.raw(), l2g_p.raw());
+
+        cudaCheckError();
+        /*
+        //slow version of the above kernel
+        for(int ii=0; ii<nrow; ii++){
+            int s = RAP.row_offsets[ii];
+            int e = RAP.row_offsets[ii+1];
+            for (int jj=s; jj<e; jj++) {
+                int col = RAP.col_indices[jj];
+                if (col>=nrow){
+                    int kk = col-RAP.get_num_rows();
+                    l2g_p[kk] = 1;
+                }
+            }
+        }
+        cudaCheckError();
+        */
+        //create a pointer map for their location using prefix sum
+        thrust_wrapper::exclusive_scan(l2g_p.begin(), l2g_p.end(), l2g_p.begin());
+        int new_nl2g = l2g_p[nl2g];
+
+        //compress the columns using the pointer map
+        if (nblocks > 0)
+            compress_existing_local_columns<int> <<< nblocks, AMGX_CAL_BLOCK_SIZE>>>
+            (nrow, RAP.row_offsets.raw(), RAP.col_indices.raw(), l2g_p.raw());
+
+        cudaCheckError();
+        /*
+        //slow version of the above kernel
+        for(int ii=0; ii<nrow; ii++){
+            int s = RAP.row_offsets[ii];
+            int e = RAP.row_offsets[ii+1];
+            for (int jj=s; jj<e; jj++) {
+                int col = RAP.col_indices[jj];
+                if (col>=nrow){
+                    int kk = col-RAP.get_num_rows();
+                    RAP.col_indices[jj] = nrow+l2g_p[kk];
+                }
+            }
+        }
+        cudaCheckError();
+        */
+        //adjust matrix size (number of columns) accordingly
+        RAP.set_initialized(0);
+        RAP.set_num_cols(nrow + new_nl2g);
+        RAP.set_initialized(1);
+        //compress local_to_global_map using the pointer map
+        nblocks = (nl2g + AMGX_CAL_BLOCK_SIZE - 1) / AMGX_CAL_BLOCK_SIZE;
+
+        if (nblocks > 0)
+            compress_existing_local_to_global_columns<int, int64_t> <<< nblocks, AMGX_CAL_BLOCK_SIZE>>>
+            (nl2g, RAP.manager->local_to_global_map.raw(), l2g_t.raw(), l2g_p.raw());
+
+        cudaCheckError();
+        thrust::copy(l2g_t.begin(), l2g_t.begin() + new_nl2g, RAP.manager->local_to_global_map.begin());
+        cudaCheckError();
+        /*
+        //slow version of the above kernel (through Thrust)
+        for(int ii=0; ii<(l2g_p.size()-1); ii++){
+            if (l2g_p[ii] != l2g_p[ii+1]){
+                RAP.manager->local_to_global_map[l2g_p[ii]] = RAP.manager->local_to_global_map[ii];
+            }
+        }
+        cudaCheckError();
+        */
+        //adjust local_to_global_map size accordingly
+        RAP.manager->local_to_global_map.resize(new_nl2g);
+    }
+
+    // we also need to renumber columns of P and rows or R correspondingly since we changed RAP halo columns
+    // for R we just keep track of renumbering in and exchange proper vectors in restriction
+    // for P we actually need to renumber columns for prolongation:
     if (A.is_matrix_distributed() && this->A->manager->get_num_partitions() > 1)
     {
         RAP.set_initialized(0);
@@ -345,30 +541,132 @@ void Classical_AMG_Level_Base<T_Config>::createCoarseMatrices()
         RAP.setView(OWNED);
         RAP.set_initialized(1);
         // update # of columns in P - this is necessary for correct CSR multiply
-        P.set_initialized(0);
-        int new_num_cols = thrust_wrapper::reduce(P.col_indices.begin(), P.col_indices.end(), int(0), thrust::maximum<int>()) + 1;
+        this->P.set_initialized(0);
+        int new_num_cols = thrust_wrapper::reduce(this->P.col_indices.begin(), this->P.col_indices.end(), int(0), thrust::maximum<int>()) + 1;
         cudaCheckError();
-        P.set_num_cols(new_num_cols);
-        P.set_initialized(1);
+        this->P.set_num_cols(new_num_cols);
+        this->P.set_initialized(1);
     }
 
     RAP.copyAuxData(&A);
 
     if (!A.is_matrix_singleGPU() && RAP.manager == NULL)
     {
-        RAP.manager = new DistributedManager<TConfig>();
+        RAP.manager = new DistributedManager<TConfig_d>();
     }
 
     if (this->getA().is_matrix_singleGPU())
     {
-        this->m_next_level_size = this->getNextLevel(typename Matrix<TConfig>::memory_space() )->getA().get_num_rows() * this->getNextLevel(typename Matrix<TConfig>::memory_space() )->getA().get_block_dimy();
+        this->m_next_level_size = this->getNextLevel(typename Matrix<TConfig_d>::memory_space() )->getA().get_num_rows() * this->getNextLevel(typename Matrix<TConfig_d>::memory_space() )->getA().get_block_dimy();
     }
     else
     {
         // m_next_level_size is the size that will be used to allocate xc, bc vectors
         int size, offset;
-        this->getNextLevel(typename Matrix<TConfig>::memory_space())->getA().getOffsetAndSizeForView(FULL, &offset, &size);
-        this->m_next_level_size = size * this->getNextLevel(typename Matrix<TConfig>::memory_space() )->getA().get_block_dimy();
+        this->getNextLevel(typename Matrix<TConfig_d>::memory_space())->getA().getOffsetAndSizeForView(FULL, &offset, &size);
+        this->m_next_level_size = size * this->getNextLevel(typename Matrix<TConfig_d>::memory_space() )->getA().get_block_dimy();
+    }
+}
+
+template <class T_Config>
+void Classical_AMG_Level_Base<T_Config>::createCoarseMatrices()
+{
+    if (this->A->is_matrix_distributed() && this->A->manager->get_num_partitions() > 1)
+    {
+        printf("FLATTERNED\n");
+        createCoarseMatricesFlattened();
+    }
+    else
+    {
+        // allocate aggressive interpolator if needed
+        if (AMG_Level<T_Config>::getLevelIndex() < this->num_aggressive_levels)
+        {
+            if (interpolator) { delete interpolator; }
+
+            interpolator = chooseAggressiveInterpolator<T_Config>(AMG_Level<T_Config>::amg->m_cfg, AMG_Level<T_Config>::amg->m_cfg_scope);
+        }
+
+        Matrix<T_Config> &RAP = this->getNextLevel( typename Matrix<T_Config>::memory_space( ) )->getA( );
+        Matrix<T_Config> &A = this->getA();
+        /* WARNING: exit if D1 interpolator is selected in distributed setting */
+        std::string s("");
+        s += AMG_Level<T_Config>::amg->m_cfg->AMG_Config::getParameter<std::string>("interpolator", AMG_Level<T_Config>::amg->m_cfg_scope);
+
+        if (A.is_matrix_distributed() && (s.compare("D1") == 0))
+        {
+            FatalError("D1 interpolation is not supported in distributed settings", AMGX_ERR_NOT_IMPLEMENTED);
+        }
+
+        /* WARNING: do not recompute prolongation (P) and restriction (R) when you
+                    are reusing the level structure (structure_reuse_levels > 0) */
+        if (this->isReuseLevel() == false)
+        {
+            computeProlongationOperator();
+        }
+
+        // Compute Restriction operator and coarse matrix Ac
+        if (!this->A->is_matrix_distributed() || this->A->manager->get_num_partitions() == 1)
+        {
+            /* WARNING: see above warning. */
+            if (this->isReuseLevel() == false)
+            {
+                computeRestrictionOperator();
+            }
+
+            computeAOperator();
+        }
+        else
+        {
+            /* WARNING: notice that in this case the computeRestructionOperator() is called
+                        inside computeAOperator_distributed() routine. */
+            computeAOperator_distributed();
+        }
+
+    // we also need to renumber columns of P and rows or R correspondingly since we changed RAP halo columns
+    // for R we just keep track of renumbering in and exchange proper vectors in restriction
+    // for P we actually need to renumber columns for prolongation:
+        if (A.is_matrix_distributed() && this->A->manager->get_num_partitions() > 1)
+        {
+            RAP.set_initialized(0);
+            // Renumber the owned nodes as interior and boundary (renumber rows and columns)
+            // We are passing reuse flag to not create neighbours list from scratch, but rather update based on new halos
+            RAP.manager->renumberMatrixOneRing(this->isReuseLevel());
+            // Renumber the column indices of P and shuffle rows of P
+            RAP.manager->renumber_P_R(this->P, this->R, A);
+            // Create the B2L_maps for RAP
+            {
+                nvtxRange fdafds("createOneRingHaloRows RAP");
+                RAP.manager->createOneRingHaloRows();
+            }
+            RAP.manager->getComms()->set_neighbors(RAP.manager->num_neighbors());
+            RAP.setView(OWNED);
+            RAP.set_initialized(1);
+            // update # of columns in P - this is necessary for correct CSR multiply
+            P.set_initialized(0);
+            int new_num_cols = thrust_wrapper::reduce(P.col_indices.begin(), P.col_indices.end(), int(0), thrust::maximum<int>()) + 1;
+            cudaCheckError();
+            P.set_num_cols(new_num_cols);
+            P.set_initialized(1);
+        }
+
+        RAP.copyAuxData(&A);
+
+        if (!A.is_matrix_singleGPU() && RAP.manager == NULL)
+        {
+            RAP.manager = new DistributedManager<TConfig>();
+        }
+
+        if (this->getA().is_matrix_singleGPU())
+        {
+            this->m_next_level_size = this->getNextLevel(typename Matrix<TConfig>::memory_space() )->getA().get_num_rows() * this->getNextLevel(typename Matrix<TConfig>::memory_space() )->getA().get_block_dimy();
+        }
+        else
+        {
+            // m_next_level_size is the size that will be used to allocate xc, bc vectors
+            int size, offset;
+            this->getNextLevel(typename Matrix<TConfig>::memory_space())->getA().getOffsetAndSizeForView(FULL, &offset, &size);
+            this->m_next_level_size = size * this->getNextLevel(typename Matrix<TConfig>::memory_space() )->getA().get_block_dimy();
+        }
     }
 }
 

@@ -102,6 +102,7 @@ class Classical_AMG_Level_Base : public AMG_Level<T_Config>
 
         virtual void computeAOperator_1x1() = 0;
         virtual void computeAOperator_1x1_distributed() = 0;
+        virtual void createCoarseMatricesFlattened() = 0;
         void prepareNextLevelMatrix(const Matrix<TConfig> &A, Matrix<TConfig> &Ac) {};
         void consolidateVector(VVector &x);
         void unconsolidateVector(VVector &x);
@@ -154,6 +155,7 @@ class Classical_AMG_Level< TemplateConfig<AMGX_host, t_vecPrec, t_matPrec, t_ind
         Classical_AMG_Level(AMG_Class *amg) : Classical_AMG_Level_Base<TConfig_h>(amg) {}
         void computeAOperator_1x1();
         void computeAOperator_1x1_distributed();
+        void createCoarseMatricesFlattened();
 };
 
 // specialization for device
@@ -186,6 +188,7 @@ class Classical_AMG_Level< TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_i
         Classical_AMG_Level(AMG_Class *amg) : Classical_AMG_Level_Base<TConfig_d>(amg) {}
         void computeAOperator_1x1();
         void computeAOperator_1x1_distributed();
+        void createCoarseMatricesFlattened();
 };
 
 } // namespace classical
