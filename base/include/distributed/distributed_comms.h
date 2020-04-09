@@ -149,6 +149,7 @@ class DistributedComms
         virtual void createSubComm( HIVector &coarse_part_to_fine_part, bool is_root_partition ) = 0;
 
 #ifdef AMGX_WITH_MPI
+        virtual int get_neighbors() const = 0;
         virtual MPI_Comm get_mpi_comm() = 0;
         virtual void set_mpi_comm(MPI_Comm &new_comm) = 0;
 #endif

@@ -1265,7 +1265,7 @@ void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
     if (this->isReuseLevel() == false)
     {
         {
-            nvtxRange nvtx_gim("generateInterpolationMatrix")
+            nvtxRange nvtx_gim("generateInterpolationMatrix");
 
             //generate the interpolation matrix
             this->interpolator->generateInterpolationMatrix(A, this->m_cf_map, this->m_s_con, this->m_scratch, P, AMG_Level<TConfig_d>::amg);
@@ -1405,41 +1405,52 @@ void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
 
     //A.manager->getComms()->exchange_matrix_halo(halo_rows_P_row_offsets, halo_rows_P_col_indices, halo_rows_P_values, dummy_halo_ids, A.manager->neighbors, A.manager->global_id());
 
-    int total = 0;
-    MPI_Comm_size( mpi_comm, &total );
-    int num_neighbors = A.manager->neighbors.size();
-    std::vector<HIVector> local_row_offsets(num_neighbors);
-    std::vector<HI64Vector> local_col_indices(num_neighbors);
-    std::vector<HMVector> local_values(num_neighbors);
-    std::vector<HIVector> send_row_offsets(num_neighbors);
-    std::vector<HI64Vector> send_col_indices(num_neighbors);
-    std::vector<HMVector> send_values(num_neighbors);
+    typedef typename TConfig_h::template setVecPrec<(AMGX_VecPrecision)AMGX_GET_MODE_VAL(AMGX_MatPrecision, TConfig_h::mode)>::Type hmvec_value_type;
+    typedef Vector<hmvec_value_type> MVector_h;
 
-    for (int i = 0; i < num_neighbors; i++)
+    int total = 0;
+    int neighbors = A.manager->getComms()->get_neighbors();
+    MPI_Comm mpi_comm = A.manager->getComms()->get_mpi_comm();
+    MPI_Comm_size( mpi_comm, &total );
+    std::vector<IVector_h> local_row_offsets(neighbors);
+    std::vector<I64Vector_h> local_col_indices(neighbors);
+    std::vector<MVector_h> local_values(neighbors);
+    std::vector<IVector_h> send_row_offsets(neighbors);
+    std::vector<I64Vector_h> send_col_indices(neighbors);
+    std::vector<MVector_h> send_values(neighbors);
+
+    for (int i = 0; i < neighbors; i++)
     {
         send_row_offsets[i] = halo_rows_P_row_offsets[i];
         send_col_indices[i] = halo_rows_P_col_indices[i];
         send_values[i] = halo_rows_P_values[i];
     }
 
-    std::vector<HI64Vector> local_row_ids(0);
-    std::vector<HI64Vector> send_row_ids(0);
+    std::vector<I64Vector_h> local_row_ids(0);
+    std::vector<I64Vector_h> send_row_ids(0);
 
     if (dummy_halo_ids.size() != 0)
     {
-        local_row_ids.resize(num_neighbors);
-        send_row_ids.resize(num_neighbors);
+        local_row_ids.resize(neighbors);
+        send_row_ids.resize(neighbors);
 
-        for (int i = 0; i < num_neighbors; i++)
+        for (int i = 0; i < neighbors; i++)
         {
             send_row_ids[i] = dummy_halo_ids[i];
         }
     }
 
     // send metadata
-    std::vector<INDEX_TYPE> metadata(num_neighbors * 2); // num_rows+1, num_nz
+    std::vector<INDEX_TYPE> metadata(neighbors * 2); // num_rows+1, num_nz
 
-    for (int i = 0; i < num_neighbors; i++)
+    std::vector<MPI_Request> requests(10*neighbors);
+
+    for (int i = 0; i < 10 * neighbors; i++)
+    {
+        requests[i] = MPI_REQUEST_NULL;
+    }
+
+    for (int i = 0; i < neighbors; i++)
     {
         metadata[i * 2 + 0] = halo_rows_P_row_offsets[i].size();
         metadata[i * 2 + 1] = halo_rows_P_col_indices[i].size();
@@ -1449,7 +1460,7 @@ void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
     // receive metadata
     std::vector<INDEX_TYPE> metadata_recv(2);
 
-    for (int i = 0; i < num_neighbors; i++)
+    for (int i = 0; i < neighbors; i++)
     {
         MPI_Recv(&metadata_recv[0], 2, MPI_INT, A.manager->neighbors[i], 0, mpi_comm, MPI_STATUSES_IGNORE);
         local_row_offsets[i].resize(metadata_recv[0]);
@@ -1465,46 +1476,46 @@ void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
         }
     }
 
-    MPI_Waitall(num_neighbors, &requests[0], MPI_STATUSES_IGNORE); // data is already received, just closing the handles
-    // receive matrix data
-    typedef typename T_Config::MatPrec mvalue;
+    MPI_Waitall(neighbors, &requests[0], MPI_STATUSES_IGNORE); // data is already received, just closing the handles
 
-    for (int i = 0; i < num_neighbors; i++)
+    // receive matrix data
+
+    for (int i = 0; i < neighbors; i++)
     {
-        MPI_Irecv(local_row_offsets[i].raw(), local_row_offsets[i].size(), MPI_INT, A.manager->neighbors[i], 10 * A.manager->neighbors[i] + 0, mpi_comm, &requests[3 * num_neighbors + i]);
-        MPI_Irecv(local_col_indices[i].raw(), local_col_indices[i].size()*sizeof(int64_t), MPI_BYTE, A.manager->neighbors[i], 10 * A.manager->neighbors[i] + 1, mpi_comm, &requests[4 * num_neighbors + i]);
-        MPI_Irecv(local_values[i].raw(), local_values[i].size()*sizeof(mvalue), MPI_BYTE, A.manager->neighbors[i], 10 * A.manager->neighbors[i] + 2, mpi_comm, &requests[5 * num_neighbors + i]);
+        MPI_Irecv(local_row_offsets[i].raw(), local_row_offsets[i].size(), MPI_INT, A.manager->neighbors[i], 10 * A.manager->neighbors[i] + 0, mpi_comm, &requests[3 * neighbors + i]);
+        MPI_Irecv(local_col_indices[i].raw(), local_col_indices[i].size()*sizeof(int64_t), MPI_BYTE, A.manager->neighbors[i], 10 * A.manager->neighbors[i] + 1, mpi_comm, &requests[4 * neighbors + i]);
+        MPI_Irecv(local_values[i].raw(), local_values[i].size()*sizeof(double), MPI_BYTE, A.manager->neighbors[i], 10 * A.manager->neighbors[i] + 2, mpi_comm, &requests[5 * neighbors + i]);
 
         if (send_row_ids.size() != 0)
         {
-            MPI_Irecv(local_row_ids[i].raw(), local_row_ids[i].size()*sizeof(int64_t), MPI_BYTE, A.manager->neighbors[i], 10 * A.manager->neighbors[i] + 3, mpi_comm, &requests[7 * num_neighbors + i]);
+            MPI_Irecv(local_row_ids[i].raw(), local_row_ids[i].size()*sizeof(int64_t), MPI_BYTE, A.manager->neighbors[i], 10 * A.manager->neighbors[i] + 3, mpi_comm, &requests[7 * neighbors + i]);
         }
     }
     //Note: GPU Direct should use row_offsets[], col_indices[], values[] directly in here:
     // send matrix: row offsets, col indices, values
-    for (int i = 0; i < num_neighbors; i++)
+    for (int i = 0; i < neighbors; i++)
     {
         MPI_Isend(send_row_offsets[i].raw(), send_row_offsets[i].size(), MPI_INT, A.manager->neighbors[i], 10 * A.manager->global_id() + 0, mpi_comm, &requests[i]);
-        MPI_Isend(send_col_indices[i].raw(), send_col_indices[i].size()*sizeof(int64_t), MPI_BYTE, A.manager->neighbors[i], 10 * A.manager->global_id() + 1, mpi_comm, &requests[num_neighbors + i]);
-        MPI_Isend(send_values[i].raw(), send_values[i].size()*sizeof(mvalue), MPI_BYTE, A.manager->neighbors[i], 10 * A.manager->global_id() + 2, mpi_comm, &requests[2 * num_neighbors + i]);
+        MPI_Isend(send_col_indices[i].raw(), send_col_indices[i].size()*sizeof(int64_t), MPI_BYTE, A.manager->neighbors[i], 10 * A.manager->global_id() + 1, mpi_comm, &requests[neighbors + i]);
+        MPI_Isend(send_values[i].raw(), send_values[i].size()*sizeof(double), MPI_BYTE, A.manager->neighbors[i], 10 * A.manager->global_id() + 2, mpi_comm, &requests[2 * neighbors + i]);
 
         if (send_row_ids.size() != 0)
         {
-            MPI_Isend(send_row_ids[i].raw(), send_row_ids[i].size()*sizeof(int64_t), MPI_BYTE, A.manager->neighbors[i], 10 * A.manager->global_id() + 3, mpi_comm, &requests[6 * num_neighbors + i]);
+            MPI_Isend(send_row_ids[i].raw(), send_row_ids[i].size()*sizeof(int64_t), MPI_BYTE, A.manager->neighbors[i], 10 * A.manager->global_id() + 3, mpi_comm, &requests[6 * neighbors + i]);
         }
     }
 
     if (dummy_halo_ids.size() != 0)
     {
-        MPI_Waitall(8 * num_neighbors, &requests[0], MPI_STATUSES_IGNORE);    //I have to wait for my stuff to be sent too, because I deallocate those matrices upon exditing this function
+        MPI_Waitall(8 * neighbors, &requests[0], MPI_STATUSES_IGNORE);    //I have to wait for my stuff to be sent too, because I deallocate those matrices upon exditing this function
     }
     else
     {
-        MPI_Waitall(6 * num_neighbors, &requests[0], MPI_STATUSES_IGNORE);    //I have to wait for my stuff to be sent too, because I deallocate those matrices upon exditing this function
+        MPI_Waitall(6 * neighbors, &requests[0], MPI_STATUSES_IGNORE);    //I have to wait for my stuff to be sent too, because I deallocate those matrices upon exditing this function
     }
 
     //Note: GPU Direct should swap here
-    for (int i = 0; i < num_neighbors; i++)
+    for (int i = 0; i < neighbors; i++)
     {
         halo_rows_P_row_offsets[i] = local_row_offsets[i];
         halo_rows_P_col_indices[i] = local_col_indices[i];
@@ -1831,7 +1842,18 @@ void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
     RAP_full.set_initialized( 0 );
     /* WARNING: Since A is reordered (into interior and boundary nodes), while R and P are not reordered,
                 you must unreorder A when performing R*A*P product in ordre to obtain the correct result. */
-    CSR_Multiply<TConfig_d>::csr_galerkin_product( this->R, this->getA(), this->P, RAP_full, NULL, NULL NULL, NULL, NULL NULL, wk );
+    CSR_Multiply<TConfig_d>::csr_galerkin_product(
+        this->R,
+        this->getA(),
+        this->P,
+        RAP_full,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        wk );
     RAP_full.set_initialized( 1 );
     this->Profile.toc("computeA");
     // ----------------------------------------------------------------------------------------------
