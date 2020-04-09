@@ -1799,9 +1799,54 @@ void Classical_AMG_Level<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_ind
 
     cudaCheckError();
 
+    //prep->append_halo_rows(P, halo_rows_P_row_offsets, halo_rows_P_local_col_indices, halo_rows_P_values);
+
     // Append the new rows to the matrix P
     P.set_initialized(0);
-    prep->append_halo_rows(P, halo_rows_P_row_offsets, halo_rows_P_local_col_indices, halo_rows_P_values);
+
+    int new_num_rows = P.get_num_rows();
+    int new_num_nnz = P.row_offsets[P.get_num_rows()];
+    int cur_row = P.get_num_rows();
+    int cur_offset = new_num_nnz;
+
+    for (int i = 0; i < num_neighbors; i++)
+    {
+        int size = halo_rows_P_row_offsets[i].size();
+
+        if (size != 0)
+        {
+            new_num_rows += halo_rows_P_row_offsets[i].size() - 1;
+            new_num_nnz += halo_rows_P_local_col_indices[i].size();
+        }
+    }
+
+    P.resize(new_num_rows, new_num_rows, new_num_nnz, 1, 1, 1);
+
+    for (int i = 0; i < num_neighbors; i++)
+    {
+        int num_halo_rows = halo_rows_P_row_offsets[i].size() - 1;
+
+        if (num_halo_rows > 0)
+        {
+            // update halo row offsets in-place
+            thrust::transform(halo_rows_P_row_offsets[i].begin(), halo_rows_P_row_offsets[i].end(), thrust::constant_iterator<INDEX_TYPE>(cur_offset), halo_rows_P_row_offsets[i].begin(), thrust::plus<INDEX_TYPE>());
+            // insert halo rows
+            thrust::copy(halo_rows_P_row_offsets[i].begin(), halo_rows_P_row_offsets[i].end() - 1, P.row_offsets.begin() + cur_row);
+            thrust::copy(halo_rows_P_local_col_indices[i].begin(), halo_rows_P_local_col_indices[i].end(), P.col_indices.begin() + cur_offset);
+            thrust::copy(halo_rows_P_values[i].begin(), halo_rows_P_values[i].end(), P.values.begin() + cur_offset);
+            // update counters
+            cur_offset = halo_rows_P_row_offsets[i][num_halo_rows];
+            cur_row += num_halo_rows;
+        }
+    }
+
+    cudaCheckError();
+    P.row_offsets[P.get_num_rows()] = cur_offset;
+    int num_cols = -1;
+    num_cols = thrust_wrapper::reduce(P.col_indices.begin(), P.col_indices.end(), num_cols, thrust::maximum<int>()) + 1;
+    cudaCheckError();
+    P.set_num_cols(num_cols);
+
     P.set_initialized(1);
 
     // At this point, we can compute RAP_full which contains some rows that will need to be sent to neighbors
