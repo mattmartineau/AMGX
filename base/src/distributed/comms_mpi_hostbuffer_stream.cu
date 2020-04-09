@@ -776,8 +776,6 @@ bool CommsMPIHostBufferStream<T_Config>::do_exchange_halo_query(T &b, const Matr
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::exchange_matrix_halo(IVector_Array &row_offsets, I64Vector_Array &col_indices, MVector_Array &values, I64Vector_Array &halo_row_ids, IVector_h &neighbors_list, int global_id)
 {
-    nvtxRange nvtxemh(__func__);
-
 #ifdef AMGX_WITH_MPI
     int total = 0;
     MPI_Comm_size( mpi_comm, &total );
