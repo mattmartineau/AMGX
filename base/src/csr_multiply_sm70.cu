@@ -1008,23 +1008,11 @@ compute_values_kernel( const int A_num_rows,
     {
         int c_row_id = a_row_id;
 
-        if (Aq1 != NULL)
-        {
-            a_row_id = Aq1[a_row_id];
-        }
-
         // Clear the map.
         map.clear();
         // Load the range of the row.
-        int a_col_tmp = -1;
-
-        if ( lane_id < 2 )
-        {
-            a_col_tmp = utils::Ld<utils::LD_NC>::load( &A_rows[a_row_id + lane_id] );
-        }
-
-        int a_col_it  = utils::shfl( a_col_tmp, 0 );
-        int a_col_end = utils::shfl( a_col_tmp, 1 );
+        int a_col_it  = A_rows[a_row_id];
+        int a_col_end = A_rows[a_row_id+1];
 
         // Iterate over the columns of A.
         for ( a_col_it += lane_id ; utils::any(a_col_it < a_col_end) ; a_col_it += WARP_SIZE )
@@ -1034,22 +1022,10 @@ compute_values_kernel( const int A_num_rows,
             // Columns of A maps to rows of B. Each thread of the warp loads its A-col/B-row ID.
             int b_row_id = -1;
             Value_type a_value = amgx::types::util<Value_type>::get_zero();
-
             if ( is_active )
             {
-                b_row_id = utils::Ld<utils::LD_NC>::load( &A_cols[a_col_it] );
-                a_value  = utils::Ld<utils::LD_NC>::load( &A_vals[a_col_it] );
-
-                //b_row_id is actually column of A
-                if (Aq2 != NULL)
-                {
-                    b_row_id = Aq2[b_row_id];
-                }
-
-                if (Bq1 != NULL)
-                {
-                    b_row_id = Bq1[b_row_id];
-                }
+                b_row_id = A_cols[a_col_it];
+                a_value  = A_vals[a_col_it];
             }
 
             const int num_rows = __popc( utils::ballot(is_active) );
@@ -1062,15 +1038,8 @@ compute_values_kernel( const int A_num_rows,
                 // The value of A.
                 const Value_type uniform_a_value = utils::shfl( a_value, k );
                 // Load the range of the row of B.
-                int b_col_tmp = -1;
-
-                if ( lane_id < 2 )
-                {
-                    b_col_tmp = utils::Ld<utils::LD_NC>::load( &B_rows[uniform_b_row_id + lane_id] );
-                }
-
-                int b_col_it  = utils::shfl( b_col_tmp, 0 );
-                int b_col_end = utils::shfl( b_col_tmp, 1 );
+                int b_col_it  = B_rows[uniform_b_row_id];
+                int b_col_end = B_rows[uniform_b_row_id+1];
 
                 // Iterate over the range of columns of B.
                 for ( b_col_it += lane_id ; utils::any(b_col_it < b_col_end) ; b_col_it += WARP_SIZE )
@@ -1080,30 +1049,18 @@ compute_values_kernel( const int A_num_rows,
 
                     if ( b_col_it < b_col_end )
                     {
-                        b_col_id = utils::Ld<utils::LD_NC>::load( &B_cols[b_col_it] );
-                        b_value  = utils::Ld<utils::LD_NC>::load( &B_vals[b_col_it] );
-
-                        if (Bq2 != NULL)
-                        {
-                            b_col_id = Bq2[b_col_id];
-                        }
+                        b_col_id = B_cols[b_col_it];
+                        b_value  = B_vals[b_col_it];
                     }
 
-                    map.insert( b_col_id, uniform_a_value, b_value, wk_status );
+                    //map.insert( b_col_id, uniform_a_value, b_value, wk_status );
                 }
             }
         }
 
         // Store the results.
-        int c_col_tmp = -1;
-
-        if ( lane_id < 2 )
-        {
-            c_col_tmp = utils::Ld<utils::LD_NC>::load( &C_rows[c_row_id + lane_id] );
-        }
-
-        int c_col_it  = utils::shfl( c_col_tmp, 0 );
-        int c_col_end = utils::shfl( c_col_tmp, 1 );
+        int c_col_it  = C_rows[c_row_id];
+        int c_col_end = C_rows[c_row_id+1];
         // Store the results.
         int count = c_col_end - c_col_it;
 
