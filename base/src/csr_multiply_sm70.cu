@@ -1053,7 +1053,7 @@ compute_values_kernel( const int A_num_rows,
                         b_value  = B_vals[b_col_it];
                     }
 
-                    //map.insert( b_col_id, uniform_a_value, b_value, wk_status );
+                    map.insert( b_col_id, uniform_a_value, b_value, wk_status );
                 }
             }
         }
