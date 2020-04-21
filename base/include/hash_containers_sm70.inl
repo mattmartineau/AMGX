@@ -688,15 +688,18 @@ class Hash_map
         // Is there any value in GMEM.
         bool m_any_gmem;
 
+        int* m_gmem_rst;
+
     public:
         // Constructor.
         __device__ __forceinline__
-        Hash_map( volatile Key_type *smem_keys, volatile Key_type *gmem_keys, volatile Word *smem_vote, T *gmem_vals, int gmem_size ) :
+        Hash_map( volatile Key_type *smem_keys, volatile Key_type *gmem_keys, volatile Word *smem_vote, T *gmem_vals, int gmem_size, int *gmem_rst = NULL ) :
             m_smem_keys(smem_keys),
             m_gmem_keys(gmem_keys),
             m_smem_vote(smem_vote),
             m_gmem_vals(gmem_vals),
             m_gmem_size(gmem_size),
+            m_gmem_rst(gmem_rst),
             m_any_gmem (true)
         {}
 
@@ -772,7 +775,20 @@ void Hash_map<Key_type, T, SMEM_SIZE, NUM_HASH_FCTS, WARP_SIZE>::clear()
 
     for ( int offset = lane_id ; offset < m_gmem_size ; offset += WARP_SIZE )
     {
-        m_gmem_keys[offset] = -1;
+        if(m_gmem_rst != NULL)
+        {
+            int bucket = offset / 32;
+            int pocket = offset % 32;
+            if(m_gmem_rst[bucket] & (0x1 << pocket))
+            {
+                m_gmem_keys[offset] = -1;
+                atomicAnd(&m_gmem_rst[bucket], ~(0x1 << pocket));
+            }
+        }
+        else
+        {
+            m_gmem_keys[offset] = -1;
+        }
     }
 
     m_any_gmem = false;
@@ -899,6 +915,13 @@ void Hash_map<Key_type, T, SMEM_SIZE, NUM_HASH_FCTS, WARP_SIZE>::insert( Key_typ
 
             if ( stored_key == key )
             {
+                if(m_gmem_rst != NULL)
+                {
+                    int bucket = hash / 32;
+                    int pocket = hash % 32;
+                    atomicOr(&m_gmem_rst[bucket], (0x1 << pocket));
+                }
+
                 m_gmem_vals[hash] = m_gmem_vals[hash] + a_value * b_value;
                 done = true;
             }
@@ -912,6 +935,13 @@ void Hash_map<Key_type, T, SMEM_SIZE, NUM_HASH_FCTS, WARP_SIZE>::insert( Key_typ
 
             if ( candidate && key == m_gmem_keys[hash] ) // More than one candidate may have written to that slot.
             {
+                if(m_gmem_rst != NULL)
+                {
+                    int bucket = hash / 32;
+                    int pocket = hash % 32;
+                    atomicOr(&m_gmem_rst[bucket], (0x1 << pocket));
+                }
+
                 m_gmem_vals[hash] = a_value * b_value;
                 done = true;
             }
@@ -1138,22 +1168,33 @@ void Hash_map<Key_type, T, SMEM_SIZE, NUM_HASH_FCTS, WARP_SIZE>::store( int coun
 
     for ( int offset = lane_id ; offset < m_gmem_size ; offset += WARP_SIZE )
     {
-        Key_type key = m_gmem_keys[offset];
-        int poll = utils::ballot( key != -1, utils::activemask() );
+        if (m_gmem_rst != NULL)
+        {
+            int bucket = offset / 32;
+            int pocket = offset % 32;
 
-        if ( poll == 0 )
+            if((m_gmem_rst[bucket] & (0x1 << pocket)) == 0)
+            {
+                continue;
+            }
+        }
+
+        Key_type key = m_gmem_keys[offset];
+        int poll = utils::ballot(key != -1, utils::activemask());
+
+        if (poll == 0)
         {
             continue;
         }
 
-        int dst_offset = warp_offset + __popc( poll & lane_mask_lt );
+        int dst_offset = warp_offset + __popc(poll & lane_mask_lt);
 
-        if ( key != -1 )
+        if (key != -1)
         {
             vals[dst_offset] = m_gmem_vals[offset];
         }
 
-        warp_offset += __popc( poll );
+        warp_offset += __popc(poll);
     }
 }
 

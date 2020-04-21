@@ -996,12 +996,25 @@ compute_values_kernel( const int A_num_rows,
     const int lane_id = utils::lane_id();
     // First threads load the row IDs of A needed by the CTA...
     int a_row_id = blockIdx.x * NUM_WARPS + warp_id;
+
+    constexpr int max_gmem_size = 4096;
+    constexpr int bits_in_int = 32;
+    constexpr int rst_per_warp = max_gmem_size/bits_in_int;
+    __shared__ int g_rst[NUM_WARPS*rst_per_warp];
+    for(int i = lane_id; i < rst_per_warp; i += WARP_SIZE)
+    {
+        g_rst[i] = 0;
+    }
+
     // Create local storage for the set.
     Hash_map<int, Value_type, SMEM_SIZE, 4, WARP_SIZE> map( &s_keys[warp_id * SMEM_SIZE],
             &g_keys[a_row_id * gmem_size],
             &s_vote[warp_id * SMEM_SIZE / 4],
             &g_vals[a_row_id * gmem_size],
-            gmem_size );
+            gmem_size,
+            (gmem_size > max_gmem_size ? NULL : &g_rst[warp_id * rst_per_warp]));
+
+    map.clear_all();
 
     // Loop over rows of A.
     for ( ; a_row_id < A_num_rows ; a_row_id = get_work( wk_work_queue, warp_id ) )
