@@ -26,6 +26,7 @@
  */
 
 #include <solvers/pcg_solver.h>
+#include <specific_spmv.h>
 #include <blas.h>
 #include <util.h>
 
@@ -125,6 +126,7 @@ PCG_Solver<T_Config>::solve_init( VVector &b, VVector &x, bool xIsZero )
     copy( m_z, m_p, offset, size );
     m_r_z = dot(A, *this->m_r, m_z);
     A.setView(oldView);
+
 }
 
 template<class T_Config>
@@ -206,6 +208,41 @@ PCG_Solver<T_Config>::solve_iteration( VVector &b, VVector &x, bool xIsZero )
     // No convergence so far.
     A.setView(oldView);
     return !this->m_monitor_convergence;
+}
+
+template<class TConfig>
+void PCG_Solver<TConfig>::compute_norm_factor(const VVector &b, const VVector &x)
+{
+    // TODO : Should this go at the beginning
+    bool use_openfoam_norm_factor = true;
+    if(use_openfoam_norm_factor)
+    {
+        Operator<TConfig>& A = this->get_A();
+        // Calculate openfoam_norm_factor
+        VVector Ax(x.size());
+        A.apply(x, Ax);
+
+        ValueTypeB x_avg = thrust::reduce(x.begin(), x.end()) / (double)x.size();
+
+        VVector b_cp(b);
+
+        if (x_avg != types::util<ValueTypeB>::get_zero())
+        {
+            VVector x_avg_vec(A.get_num_rows(), 1.0 / x_avg);
+            VVector A_row_sum(A.get_num_rows());
+            A.apply(x_avg_vec, A_row_sum);
+
+            axpy(A_row_sum, Ax, types::util<ValueTypeB>::get_minus_one());
+            axpy(A_row_sum, b_cp, types::util<ValueTypeB>::get_minus_one());
+        }
+
+        // TODO : Communicate twice here but once is all that is necessary...
+        ValueTypeB norm_factor = get_norm(A, Ax, L1) + get_norm(A, b_cp, L1);
+
+        printf("OpenFOAM norm_factor %.12e\n", norm_factor);
+
+        this->set_norm_factor(norm_factor);
+    }
 }
 
 template<class T_Config>

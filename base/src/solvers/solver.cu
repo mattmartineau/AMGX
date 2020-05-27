@@ -121,6 +121,8 @@ Solver<TConfig>::Solver(AMG_Config &cfg, const std::string &cfg_scope,
     // Reset times.
     m_setup_time = 0.0f;
     m_solve_time = 0.0f;
+
+    m_norm_factor = types::util<PODValueB>::get_one();
 }
 
 template<class TConfig>
@@ -213,12 +215,19 @@ void Solver<TConfig>::compute_residual(const VVector &b, VVector &x,
     m_A->apply(x, r);
     axpby(b, r, r, types::util<ValueTypeB>::get_one(), types::util<ValueTypeB>::get_minus_one(), offset, size);
 }
+
 template<class TConfig>
 void Solver<TConfig>::compute_norm()
 {
     AMGX_CPU_PROFILER( "Solver::compute_norm " );
     get_norm(*m_A, *m_r, (m_use_scalar_norm ? 1 : m_A->get_block_dimy()),
              m_norm_type, m_nrm);
+
+    // Scale the norm by the provided norm factor
+    for (int i = 0; i < m_nrm.size(); ++i)
+    {
+        m_nrm[i] /= m_norm_factor;
+    }
 }
 
 template<class TConfig>
@@ -674,6 +683,8 @@ AMGX_STATUS Solver<TConfig>::solve(Vector<TConfig> &b, Vector<TConfig> &x,
         m_Scaler->scaleVector( x, amgx::UNSCALE, amgx::RIGHT); //rescale x in place
         //x.setParameter<bool>("workWithScaling", true);
     }
+
+    compute_norm_factor(b, x);
 
     // if overiding number of iterations with 0 iterations
     const int bsize = m_A->get_block_dimy();

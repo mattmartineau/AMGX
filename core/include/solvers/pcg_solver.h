@@ -74,6 +74,7 @@ class PCG_Solver : public Solver<T_Config>
 
         // Initialize the solver before running the iterations.
         void solve_init( VVector &b, VVector &x, bool xIsZero );
+        void compute_norm_factor(const VVector &b, const VVector &x);
         // Run a single iteration. Compute the residual and its norm and decide convergence.
         bool solve_iteration( VVector &b, VVector &x, bool xIsZero );
         // Finalize the solver after running the iterations.
