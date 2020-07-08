@@ -222,6 +222,7 @@ void PCG_Solver<TConfig>::compute_norm_factor(const VVector &b, const VVector &x
         VVector Ax(x.size());
         A.apply(x, Ax);
 
+        // XXX This should be average globally
         ValueTypeB x_avg = thrust::reduce(x.begin(), x.end()) / (double)x.size();
 
         VVector b_cp(b);

@@ -52,6 +52,7 @@ Solver<TConfig>::Solver(AMG_Config &cfg, const std::string &cfg_scope,
         NULL), m_num_iters(0), m_curr_iter(0), m_ref_count(1), tag(0), m_solver_name(
             "SolverNameNotSet"), m_tmng(tmng)
 {
+    m_norm_factor = types::util<PODValueB>::get_one();
     m_verbosity_level = cfg.getParameter<int>("verbosity_level", cfg_scope);
     m_print_vis_data = cfg.getParameter<int>("print_vis_data", cfg_scope) != 0;
     m_monitor_residual = cfg.getParameter<int>("monitor_residual", cfg_scope) != 0;
@@ -121,8 +122,6 @@ Solver<TConfig>::Solver(AMG_Config &cfg, const std::string &cfg_scope,
     // Reset times.
     m_setup_time = 0.0f;
     m_solve_time = 0.0f;
-
-    m_norm_factor = types::util<PODValueB>::get_one();
 }
 
 template<class TConfig>
