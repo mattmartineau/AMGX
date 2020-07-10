@@ -217,28 +217,28 @@ void PCG_Solver<TConfig>::compute_norm_factor(const VVector &b, const VVector &x
     bool use_openfoam_norm_factor = true;
     if(use_openfoam_norm_factor)
     {
-        Operator<TConfig>& A = this->get_A();
-        // Calculate openfoam_norm_factor
-        VVector Ax(x.size());
-        A.apply(x, Ax);
+        // Calculat Ax
+        Matrix<TConfig>* A = dynamic_cast<Matrix<TConfig>*>(this->m_A);
+        VVector Ax(A->get_num_rows());
+        A->apply(x, Ax, INTERIOR);
 
-        // XXX This should be average globally
-        ValueTypeB x_avg = thrust::reduce(x.begin(), x.end()) / (double)x.size();
+        // Calculate global average x
+        ValueTypeB x_avg = thrust::reduce(x.begin(), x.end());
+        A->manager->global_reduce_sum(&x_avg);
+        x_avg /= A->manager->num_rows_global;
 
         VVector b_cp(b);
-
         if (x_avg != types::util<ValueTypeB>::get_zero())
         {
-            VVector x_avg_vec(A.get_num_rows(), 1.0 / x_avg);
-            VVector A_row_sum(A.get_num_rows());
-            A.apply(x_avg_vec, A_row_sum);
-
+            VVector x_avg_vec(A->get_num_rows(), 1.0 / x_avg);
+            VVector A_row_sum(A->get_num_rows());
+            A->apply(x_avg_vec, A_row_sum, INTERIOR);
             axpy(A_row_sum, Ax, types::util<ValueTypeB>::get_minus_one());
             axpy(A_row_sum, b_cp, types::util<ValueTypeB>::get_minus_one());
         }
 
         // TODO : Communicate twice here but once is all that is necessary...
-        ValueTypeB norm_factor = get_norm(A, Ax, L1) + get_norm(A, b_cp, L1);
+        ValueTypeB norm_factor = get_norm(this->get_A(), Ax, L1) + get_norm(this->get_A(), b_cp, L1);
 
         printf("OpenFOAM norm_factor %.12e\n", norm_factor);
 
