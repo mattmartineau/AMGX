@@ -230,11 +230,11 @@ void PCG_Solver<TConfig>::compute_norm_factor(const VVector &b, const VVector &x
         VVector b_cp(b);
         if (x_avg != types::util<ValueTypeB>::get_zero())
         {
-            VVector x_avg_vec(A->get_num_rows(), 1.0 / x_avg);
+            VVector x_avg_vec(A->get_num_rows(), 1.0);
             VVector A_row_sum(A->get_num_rows());
             A->apply(x_avg_vec, A_row_sum, INTERIOR);
-            axpy(A_row_sum, Ax, types::util<ValueTypeB>::get_minus_one());
-            axpy(A_row_sum, b_cp, types::util<ValueTypeB>::get_minus_one());
+            axpy(A_row_sum, Ax, -x_avg);
+            axpy(A_row_sum, b_cp, -x_avg);
         }
 
         // TODO : Communicate twice here but once is all that is necessary...
