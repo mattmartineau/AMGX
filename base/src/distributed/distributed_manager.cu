@@ -1169,6 +1169,19 @@ void DistributedManager<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indP
 
     if (partition == NULL)
     {
+        IVector_h rowCounts(num_ranks);
+        this->getComms()->all_gather(num_rows, rowCounts, 1);
+
+        int p = 0;
+        for (int i = 0; i < num_ranks; ++i)
+        {
+            for (int j = 0; j < rowCounts[i]; ++j)
+            {
+                partitionVec[p++] = i;
+            }
+        }
+
+#if 0
         // initialize equal partitioning
         IVector_h scanPartSize(num_ranks + 1);
 
@@ -1186,6 +1199,7 @@ void DistributedManager<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indP
 
             partitionVec[i] = p;
         }
+#endif
     }
     else
     {
