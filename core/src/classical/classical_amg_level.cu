@@ -322,6 +322,7 @@ void Classical_AMG_Level_Base<T_Config>::createCoarseMatrices()
                 computeRestrictionOperator();
             }
 
+<<<<<<< HEAD
             computeAOperator();
         }
         else
@@ -330,6 +331,31 @@ void Classical_AMG_Level_Base<T_Config>::createCoarseMatrices()
                         inside computeAOperator_distributed() routine. */
             computeAOperator_distributed();
         }
+=======
+// we also need to renumber columns of P and rows or R correspondingly since we changed RAP halo columns
+// for R we just keep track of renumbering in and exchange proper vectors in restriction
+// for P we actually need to renumber columns for prolongation:
+    if (A.is_matrix_distributed() && this->A->manager->get_num_partitions() > 1)
+    {
+        RAP.set_initialized(0);
+        // Renumber the owned nodes as interior and boundary (renumber rows and columns)
+        // We are passing reuse flag to not create neighbours list from scratch, but rather update based on new halos
+        RAP.manager->renumberMatrixOneRing(this->isReuseLevel());
+        // Renumber the column indices of P and shuffle rows of P
+        RAP.manager->renumber_P_R(this->P, this->R, A);
+        // Create the B2L_maps for RAP
+        RAP.manager->createOneRingHaloRows();
+        RAP.manager->getComms()->set_neighbors(RAP.manager->num_neighbors());
+        RAP.setView(OWNED);
+        RAP.set_initialized(1);
+        // update # of columns in P - this is necessary for correct CSR multiply
+        P.set_initialized(0);
+        int new_num_cols = thrust_wrapper::reduce(P.col_indices.begin(), P.col_indices.end(), int(0), thrust::maximum<int>()) + 1;
+        cudaCheckError();
+        P.set_num_cols(new_num_cols);
+        P.set_initialized(1);
+    }
+>>>>>>> v2.1.x
 
     // we also need to renumber columns of P and rows or R correspondingly since we changed RAP halo columns
     // for R we just keep track of renumbering in and exchange proper vectors in restriction
@@ -496,6 +522,17 @@ void Classical_AMG_Level_Base<T_Config>::computeRestrictionOperator()
         // This will cause bsrmv_with_mask_restriction to not do latency hiding
         R.setInteriorView(OWNED);
         R.setExteriorView(OWNED);
+    }
+
+    if(P.is_matrix_distributed())
+    {
+        // Setup the number of non-zeros in R using stub DistributedManager
+        R.manager = new DistributedManager<T_Config>();
+        int nrows_owned = P.manager->halo_offsets[0];
+        int nrows_full = P.manager->halo_offsets[P.manager->neighbors.size()];
+        int nz_full = R.row_offsets[nrows_full];
+        int nz_owned = R.row_offsets[nrows_owned];
+        R.manager->setViewSizes(nrows_owned, nz_owned, nrows_owned, nz_owned, nrows_full, nz_full, R.get_num_rows(), R.get_num_nz());
     }
 
     R.set_initialized(1);
