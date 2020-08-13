@@ -29,6 +29,7 @@
 #include <specific_spmv.h>
 #include <blas.h>
 #include <util.h>
+#include <sm_utils.inl>
 
 namespace amgx
 {
@@ -210,6 +211,37 @@ PCG_Solver<T_Config>::solve_iteration( VVector &b, VVector &x, bool xIsZero )
     return !this->m_monitor_convergence;
 }
 
+template<class ValueTypeA, class ValueTypeB, class IndexType>
+__global__ void calc_local_norm_factor_kernel(int nrows, ValueTypeA* Avals, IndexType* Arows, ValueTypeB* Ax, ValueTypeB* b, ValueTypeB x_avg, ValueTypeB* local_norm_factor)
+{
+    int lid = utils::lane_id();
+    int wid = utils::warp_id();
+    constexpr int warp_size = 32;
+    int nwarps = blockDim.x/warp_size;
+
+    ValueTypeB norm_factor = 0.0;
+
+    for(int i = wid + blockIdx.x*nwarps; i < nrows; i += nwarps*gridDim.x)
+    {
+        ValueTypeB warp_row_sum = 0.0;
+        for(int r = Arows[i] + lid; r < Arows[i+1]; r += warp_size)
+        {
+            warp_row_sum += Avals[r];
+        }
+
+        ValueTypeB row_sum = utils::warp_reduce<1, utils::Add>(warp_row_sum);
+        if(lid == 0)
+        {
+            norm_factor += fabs(Ax[i] - row_sum*x_avg) + fabs(b[i] - row_sum*x_avg);
+        }
+    }
+
+    if(lid == 0)
+    {
+        atomicAdd(local_norm_factor, norm_factor);
+    }
+}
+
 template<class TConfig>
 void PCG_Solver<TConfig>::compute_norm_factor(const VVector &b, const VVector &x)
 {
@@ -217,32 +249,35 @@ void PCG_Solver<TConfig>::compute_norm_factor(const VVector &b, const VVector &x
     bool use_openfoam_norm_factor = true;
     if(use_openfoam_norm_factor)
     {
-        // Calculat Ax
+        // Calculate Ax
         Matrix<TConfig>* A = dynamic_cast<Matrix<TConfig>*>(this->m_A);
         VVector Ax(A->get_num_rows());
-        A->apply(x, Ax, INTERIOR);
+        A->apply(x, Ax);
 
         // Calculate global average x
-        ValueTypeB x_avg = thrust::reduce(x.begin(), x.end());
+        ValueTypeB x_avg = thrust::reduce(x.begin(), x.begin() + A->get_num_rows());
         A->manager->global_reduce_sum(&x_avg);
         x_avg /= A->manager->num_rows_global;
 
+        // Make a copy of b
         VVector b_cp(b);
-        if (x_avg != types::util<ValueTypeB>::get_zero())
-        {
-            VVector x_avg_vec(A->get_num_rows(), 1.0);
-            VVector A_row_sum(A->get_num_rows());
-            A->apply(x_avg_vec, A_row_sum, INTERIOR);
-            axpy(A_row_sum, Ax, -x_avg);
-            axpy(A_row_sum, b_cp, -x_avg);
-        }
 
-        // TODO : Communicate twice here but once is all that is necessary...
-        ValueTypeB norm_factor = get_norm(this->get_A(), Ax, L1) + get_norm(this->get_A(), b_cp, L1);
+        // Storage for the local norm_factor
+        VVector local_norm_factor(1, 0.0);
+
+        // Calculate row sums then the local norm factors
+        calc_local_norm_factor_kernel<<<8192, 128>>>(
+            A->get_num_rows(), A->values.raw(), A->row_offsets.raw(), Ax.raw(), b_cp.raw(), x_avg, local_norm_factor.raw());
+        cudaDeviceSynchronize();
+
+        // Reduce the norm_factor over all ranks
+        ValueTypeB norm_factor = local_norm_factor[0];
+        A->manager->global_reduce_sum(&norm_factor);
+
+        // Set the norm factor for the solver
+        this->set_norm_factor(norm_factor);
 
         printf("OpenFOAM norm_factor %.12e\n", norm_factor);
-
-        this->set_norm_factor(norm_factor);
     }
 }
 
