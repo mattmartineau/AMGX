@@ -256,8 +256,15 @@ void PCG_Solver<TConfig>::compute_norm_factor(const VVector &b, const VVector &x
 
         // Calculate global average x
         ValueTypeB x_avg = thrust::reduce(x.begin(), x.begin() + A->get_num_rows());
-        A->manager->global_reduce_sum(&x_avg);
-        x_avg /= A->manager->num_rows_global;
+        if(A->is_matrix_distributed())
+        {
+            A->manager->global_reduce_sum(&x_avg);
+            x_avg /= A->manager->num_rows_global;
+        }
+        else
+        {
+            x_avg /= A->get_num_rows();
+        }
 
         // Make a copy of b
         VVector b_cp(b);
@@ -272,7 +279,10 @@ void PCG_Solver<TConfig>::compute_norm_factor(const VVector &b, const VVector &x
 
         // Reduce the norm_factor over all ranks
         ValueTypeB norm_factor = local_norm_factor[0];
-        A->manager->global_reduce_sum(&norm_factor);
+        if(A->is_matrix_distributed())
+        {
+            A->manager->global_reduce_sum(&norm_factor);
+        }
 
         // Set the norm factor for the solver
         this->set_norm_factor(norm_factor);
