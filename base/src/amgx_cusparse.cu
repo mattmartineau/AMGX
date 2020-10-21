@@ -1109,7 +1109,7 @@ inline void Cusparse::bsrmv( cusparseHandle_t handle, cusparseDirection_t dir, c
     #endif
 }
 
-// Custom implementation of SpMV to replace the original bsrxmv,
+// Custom workaround to replace the original bsrxmv,
 // but with block size of 1, so csrxmv.
 template<unsigned UNROLL, class T>
 __global__ void csrxmv(
@@ -1180,8 +1180,7 @@ inline void Xcsrxmv( cusparseHandle_t handle, cusparseDirection_t dir, cusparseO
         FatalError("Cannot currently latency hide if matrix is not row major.", AMGX_ERR_NOT_IMPLEMENTED);
     }
 
-    // Empirically determined as best unrolling factor
-    // across a number of problems on V100. Need to generalise.
+    // Empirically determined as best unrolling factor across a number of problems on V100.
     constexpr int nthreads = 128;
     int nblocks = sizeOfMask / nthreads;
     csrxmv<16><<<nblocks, nthreads>>>(sizeOfMask, *alpha, bsrVal, bsrMaskPtr, bsrRowPtr, bsrColInd, x, *beta, y);
