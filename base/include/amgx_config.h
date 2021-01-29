@@ -64,8 +64,10 @@ typedef enum
 {
     AMGX_vecDouble =          AMGX_double,
     AMGX_vecFloat =           AMGX_float,
+#ifdef ENABLE_COMPLEX
     AMGX_vecDoubleComplex =   AMGX_doublecomplex,
     AMGX_vecComplex =         AMGX_complex,
+#endif
     AMGX_vecInt =             AMGX_int,
     AMGX_vecUSInt =           AMGX_usint,
     AMGX_vecUInt =            AMGX_uint,
@@ -81,8 +83,10 @@ typedef enum
 {
     AMGX_matDouble =         AMGX_double,
     AMGX_matFloat =          AMGX_float,
+#ifdef ENABLE_COMPLEX
     AMGX_matDoubleComplex =  AMGX_doublecomplex,
     AMGX_matComplex =        AMGX_complex,
+#endif
     AMGX_matInt =            AMGX_int,
     AMGX_matPrecisionNum = AMGX_scalarPrecisionNum,
     AMGX_MatPrecisionInst
@@ -132,6 +136,7 @@ typedef enum
     AMGX_mode_dDDI = AMGX_ASSEMBLE_MODE(AMGX_device, AMGX_vecDouble, AMGX_matDouble, AMGX_indInt), // mode == 8193
     AMGX_mode_dDFI = AMGX_ASSEMBLE_MODE(AMGX_device, AMGX_vecDouble, AMGX_matFloat,  AMGX_indInt), // mode == 8449
     AMGX_mode_dFFI = AMGX_ASSEMBLE_MODE(AMGX_device, AMGX_vecFloat,  AMGX_matFloat,  AMGX_indInt), // mode == 8465
+#ifdef ENABLE_COMPLEX
     AMGX_mode_hIDI = AMGX_ASSEMBLE_MODE(AMGX_host, AMGX_vecInt,  AMGX_matDouble,  AMGX_indInt),
     AMGX_mode_hIFI = AMGX_ASSEMBLE_MODE(AMGX_host, AMGX_vecInt,  AMGX_matFloat,  AMGX_indInt),
     AMGX_mode_dIDI = AMGX_ASSEMBLE_MODE(AMGX_device, AMGX_vecInt,  AMGX_matDouble,  AMGX_indInt),
@@ -142,6 +147,7 @@ typedef enum
     AMGX_mode_dZZI = AMGX_ASSEMBLE_MODE(AMGX_device, AMGX_vecDoubleComplex,  AMGX_matDoubleComplex, AMGX_indInt), // mode == 8193
     AMGX_mode_dZCI = AMGX_ASSEMBLE_MODE(AMGX_device, AMGX_vecDoubleComplex,  AMGX_matComplex,  AMGX_indInt), // mode == 8449
     AMGX_mode_dCCI = AMGX_ASSEMBLE_MODE(AMGX_device, AMGX_vecComplex,        AMGX_matComplex,  AMGX_indInt), // mode == 8465
+#endif
     AMGX_modeNum = 10,
     AMGX_ModeInst
 } AMGX_Mode;
@@ -157,9 +163,11 @@ typedef enum
   codeLineMacro(AMGX_mode_hFFI)
 #endif
 
+#ifdef ENABLE_INTVEC
 #define AMGX_FORINTVEC_BUILDS_HOST(codeLineMacro)\
   codeLineMacro(AMGX_mode_hIDI)\
   codeLineMacro(AMGX_mode_hIFI)
+#endif
 
 /* Builds for device */
 #ifdef AMGX_build_device
@@ -176,6 +184,7 @@ typedef enum
   codeLineMacro(AMGX_mode_dIDI)\
   codeLineMacro(AMGX_mode_dIFI)
 
+#ifdef ENABLE_COMPLEX
 #define AMGX_FORCOMPLEX_BUILDS_DEVICE(codeLineMacro)\
   codeLineMacro(AMGX_mode_dZZI)\
   codeLineMacro(AMGX_mode_dZCI)\
@@ -185,19 +194,28 @@ typedef enum
   codeLineMacro(AMGX_mode_hZZI)\
   codeLineMacro(AMGX_mode_hZCI)\
   codeLineMacro(AMGX_mode_hCCI)
+#endif
 
 /* Builds for device and host */
 #define AMGX_FORALL_BUILDS(codeLineMacro)\
   AMGX_FORALL_BUILDS_HOST(codeLineMacro)\
   AMGX_FORALL_BUILDS_DEVICE(codeLineMacro)
 
+#ifdef ENABLE_COMPLEX
 #define AMGX_FORCOMPLEX_BUILDS(codeLineMacro)\
   AMGX_FORCOMPLEX_BUILDS_DEVICE(codeLineMacro)\
   AMGX_FORCOMPLEX_BUILDS_HOST(codeLineMacro)
+#else
+#define AMGX_FORCOMPLEX_BUILDS(codeLineMacro)
+#endif
 
+#ifdef ENABLE_INTVEC
 #define AMGX_FORINTVEC_BUILDS(codeLineMacro)\
   AMGX_FORINTVEC_BUILDS_HOST(codeLineMacro)\
   AMGX_FORINTVEC_BUILDS_DEVICE(codeLineMacro)
+#else
+#define AMGX_FORINTVEC_BUILDS(codeLineMacro)
+#endif
 
 
 #if defined(__cplusplus)

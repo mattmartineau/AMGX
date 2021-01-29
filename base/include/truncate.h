@@ -75,6 +75,7 @@ struct Truncate<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indPrec> >
     static void truncateByMaxElements(Matrix_d &A, const int max_elmts = 4);
 };
 
+#ifdef ENABLE_COMPLEX
 template <AMGX_MatPrecision t_matPrec, AMGX_IndPrecision t_indPrec>
 struct Truncate<TemplateConfig<AMGX_device, AMGX_vecComplex, t_matPrec, t_indPrec> >
 {
@@ -112,5 +113,6 @@ struct Truncate<TemplateConfig<AMGX_device, AMGX_vecDoubleComplex, t_matPrec, t_
         FatalError("This type of truncate for complex is not supported yet", AMGX_ERR_NOT_SUPPORTED_TARGET);
     }
 };
+#endif
 
 } // namespace amgx

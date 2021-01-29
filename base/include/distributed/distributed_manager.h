@@ -269,6 +269,7 @@ template <typename TConfig> class DistributedManagerBase
         typedef typename fvec_value_type_h::VecPrec  float_vec_type_h;
         typedef Vector<fvec_value_type_h> FVector_h;
 
+#ifdef ENABLE_COMPLEX
         typedef TemplateConfig<TConfig_h::memSpace, AMGX_vecComplex, TConfig_h::matPrec, TConfig_h::indPrec> cvec_value_type_h;
         typedef typename cvec_value_type_h::VecPrec  complex_vec_type_h;
         typedef Vector<cvec_value_type_h> CVector_h;
@@ -276,6 +277,7 @@ template <typename TConfig> class DistributedManagerBase
         typedef TemplateConfig<TConfig_h::memSpace, AMGX_vecDoubleComplex, TConfig_h::matPrec, TConfig_h::indPrec> zvec_value_type_h;
         typedef typename zvec_value_type_h::VecPrec  doublecomplex_vec_type_h;
         typedef Vector<zvec_value_type_h> ZVector_h;
+#endif
 
         typedef typename i64vec_value_type_h::VecPrec  i64_vec_type_h;
 
@@ -413,7 +415,7 @@ template <typename TConfig> class DistributedManagerBase
 
         void initializeUploadReorderAll(int n, int nnz, int block_dimx, int block_dimy, const int *row_ptrs, const int *col_indices, const void *data, const void *diag_data, Matrix<TConfig> &A);
 
-        // create comms + initialize basic internal variables 
+        // create comms + initialize basic internal variables
         void initComms(Resources *rsrc);
 
         void createComms(Resources *rsrc);
@@ -1168,6 +1170,7 @@ template <typename TConfig> class DistributedManagerBase
             *value = res[0];
         }
 
+#ifdef ENABLE_COMPLEX
         void global_reduce_sum(complex_vec_type_h *value)
         {
             CVector_h own(1);
@@ -1185,6 +1188,7 @@ template <typename TConfig> class DistributedManagerBase
             _comms->global_reduce_sum(res, own, *A, 1);
             *value = res[0];
         }
+#endif
 
         //Create renumbering to separate interior/boundary nodes based on B2L_maps
         virtual void createRenumbering(IVector &renumbering) = 0;
@@ -2090,11 +2094,11 @@ class DistributedManager< TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_in
             const int *row_offsets, const mat_value_type *values, const void *diag);
 
         template <typename t_colIndex>
-        void loadDistributedMatrixPartitionVec(int num_rows, int num_nonzeros, const int block_dimx, const int block_dimy, 
+        void loadDistributedMatrixPartitionVec(int num_rows, int num_nonzeros, const int block_dimx, const int block_dimy,
             const int *row_offsets, const t_colIndex *col_indices, const mat_value_type *values, int num_ranks, int num_rows_global, const void *diag, const int *partition);
 
         template <typename t_colIndex>
-        void loadDistributedMatrixPartitionOffsets( int num_rows, int num_nonzeros, const int block_dimx, const int block_dimy, 
+        void loadDistributedMatrixPartitionOffsets( int num_rows, int num_nonzeros, const int block_dimx, const int block_dimy,
             const int *row_offsets, const t_colIndex *col_indices, const mat_value_type *values, int num_ranks, int num_rows_global, const void *diag, const t_colIndex *partition_offsets);
 };
 }

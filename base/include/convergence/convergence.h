@@ -92,7 +92,7 @@ class Convergence
         inline std::string getName() const { return m_convergence_name; }
 
         // Initialize the before running the iterations.
-        virtual void convergence_init();
+        virtual void convergence_init(Matrix<TConfig>& A, Vector<TConfig>& b, Vector<TConfig>& x);
 
         // Run a single iteration. Compute the residual and its norm and decide convergence.
         virtual bool convergence_update_and_check(const PODVec_h &nrm, const PODVec_h &nrm_ini);

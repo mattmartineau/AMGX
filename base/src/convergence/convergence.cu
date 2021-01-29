@@ -40,7 +40,7 @@ Convergence<TConfig>::Convergence(AMG_Config &cfg, const std::string &cfg_scope)
 }
 
 template<class TConfig>
-void Convergence<TConfig>::convergence_init()
+void Convergence<TConfig>::convergence_init(Matrix<TConfig>& A, Vector<TConfig>& b, Vector<TConfig>& x)
 {
 }
 

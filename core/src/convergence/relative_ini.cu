@@ -37,7 +37,7 @@ RelativeIniConvergence<TConfig>::RelativeIniConvergence(AMG_Config &cfg, const s
 }
 
 template<class TConfig>
-void RelativeIniConvergence<TConfig>::convergence_init()
+void RelativeIniConvergence<TConfig>::convergence_init(Matrix<TConfig>& A, Vector<TConfig>& b, Vector<TConfig>& x)
 {
     this->setTolerance(this->m_cfg->template getParameter<double>("tolerance", this->m_cfg_scope));
 }

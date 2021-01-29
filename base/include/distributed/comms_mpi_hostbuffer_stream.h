@@ -48,10 +48,12 @@ class CommsMPIHostBufferStream : public CommsMPI<T_Config>
         typedef typename Base::DVector_Array DVector_Array;
         typedef typename Base::FVector FVector;
         typedef typename Base::FVector_Array FVector_Array;
+#ifdef ENABLE_COMPLEX
         typedef typename Base::CVector CVector;
         typedef typename Base::CVector_Array CVector_Array;
         typedef typename Base::ZVector ZVector;
         typedef typename Base::ZVector_Array ZVector_Array;
+#endif
         typedef typename Base::IVector IVector;
         typedef typename Base::IVector_h IVector_h;
         typedef typename Base::IVector_Array IVector_Array;
@@ -68,18 +70,22 @@ class CommsMPIHostBufferStream : public CommsMPI<T_Config>
         typedef typename Base::HDVector_Array HDVector_Array;
         typedef typename Base::HFVector HFVector;
         typedef typename Base::HFVector_Array HFVector_Array;
+#ifdef ENABLE_COMPLEX
         typedef typename Base::HCVector HCVector;
         typedef typename Base::HCVector_Array HCVector_Array;
         typedef typename Base::HZVector HZVector;
         typedef typename Base::HZVector_Array HZVector_Array;
+#endif
         typedef typename Base::HIVector HIVector;
         typedef typename Base::HI64Vector HI64Vector;
         typedef typename Base::HI64Vector_Array HI64Vector_Array;
         typedef typename Base::DIVector DIVector;
         typedef typename Base::DFVector DFVector;
         typedef typename Base::DDVector DDVector;
+#ifdef ENABLE_COMPLEX
         typedef typename Base::DCVector DCVector;
         typedef typename Base::DZVector DZVector;
+#endif
         typedef typename Base::HIVector_Array HIVector_Array;
         typedef typename Base::HBVector HBVector;
         typedef typename Base::HBVector_Array HBVector_Array;
@@ -343,6 +349,7 @@ class CommsMPIHostBufferStream : public CommsMPI<T_Config>
         void exchange_halo_async(FVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t stream = NULL);
         void send_receive_wait(FVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t &stream);
         void exchange_halo_wait(FVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t stream = NULL);
+#ifdef ENABLE_COMPLEX
         void setup(CVector &b, const Matrix<TConfig> &m, int tag, int num_rings = 1);
         void setup_L2H(CVector &b, Matrix<TConfig> &m, int num_rings = 1);
         void exchange_halo(CVector &b, const Matrix<TConfig> &m, int tag, int num_rings = 1);
@@ -355,6 +362,7 @@ class CommsMPIHostBufferStream : public CommsMPI<T_Config>
         void exchange_halo_async(ZVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t stream = NULL);
         void send_receive_wait(ZVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t &stream);
         void exchange_halo_wait(ZVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t stream = NULL);
+#endif
         void setup(IVector &b, const Matrix<TConfig> &m, int tag, int num_rings = 1);
         void setup_L2H(IVector &b, Matrix<TConfig> &m, int num_rings = 1);
         void exchange_halo(IVector &b, const Matrix<TConfig> &m, int tag, int num_rings = 1);
@@ -377,47 +385,61 @@ class CommsMPIHostBufferStream : public CommsMPI<T_Config>
         void add_from_halo(IVector &b, const Matrix<TConfig> &m, int tag, int num_rings, cudaStream_t &stream);
         void add_from_halo(DVector &b, const Matrix<TConfig> &m, int tag, int num_rings, cudaStream_t &stream);
         void add_from_halo(FVector &b, const Matrix<TConfig> &m, int tag, int num_rings, cudaStream_t &stream);
+#ifdef ENABLE_COMPLEX
         void add_from_halo(CVector &b, const Matrix<TConfig> &m, int tag, int num_rings, cudaStream_t &stream);
         void add_from_halo(ZVector &b, const Matrix<TConfig> &m, int tag, int num_rings, cudaStream_t &stream);
+#endif
 
         void gather_L2H(IVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL);
         void gather_L2H(DVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL);
         void gather_L2H(FVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL);
+#ifdef ENABLE_COMPLEX
         void gather_L2H(CVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL);
         void gather_L2H(ZVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL);
+#endif
 
         void gather_L2H_v2(IVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL);
         void gather_L2H_v2(DVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL);
         void gather_L2H_v2(FVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL);
+#ifdef ENABLE_COMPLEX
         void gather_L2H_v2(CVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL);
         void gather_L2H_v2(ZVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL);
+#endif
 
         void global_reduce(HDVector_Array &a, HDVector &b, const Operator<TConfig> &m, int tag);
         void global_reduce(HFVector_Array &a, HFVector &b, const Operator<TConfig> &m, int tag);
+#ifdef ENABLE_COMPLEX
         void global_reduce(HCVector_Array &a, HCVector &b, const Operator<TConfig> &m, int tag);
         void global_reduce(HZVector_Array &a, HZVector &b, const Operator<TConfig> &m, int tag);
+#endif
         void global_reduce(HIVector_Array &a, HIVector &b, const Operator<TConfig> &m, int tag);
         void global_reduce(HBVector_Array &a, HBVector &b, const Operator<TConfig> &m, int tag);
         void global_reduce(HI64Vector_Array &a, HI64Vector &b, const Operator<TConfig> &m, int tag);
 
         void global_reduce_sum(HDVector &a, HDVector &b, const Matrix<TConfig> &m, int tag);
         void global_reduce_sum(HFVector &a, HFVector &b, const Matrix<TConfig> &m, int tag);
+#ifdef ENABLE_COMPLEX
         void global_reduce_sum(HCVector &a, HCVector &b, const Matrix<TConfig> &m, int tag);
         void global_reduce_sum(HZVector &a, HZVector &b, const Matrix<TConfig> &m, int tag);
+#endif
         void global_reduce_sum(HIVector &a, HIVector &b, const Matrix<TConfig> &m, int tag);
         void global_reduce_sum(HI64Vector &a, HI64Vector &b, const Matrix<TConfig> &m, int tag);
 
         void exchange_vectors(DVector_Array &a, const Matrix<TConfig> &m, int tag);
         void exchange_vectors(FVector_Array &a, const Matrix<TConfig> &m, int tag);
+#ifdef ENABLE_COMPLEX
         void exchange_vectors(CVector_Array &a, const Matrix<TConfig> &m, int tag);
         void exchange_vectors(ZVector_Array &a, const Matrix<TConfig> &m, int tag);
+#endif
         void exchange_vectors(IVector_Array &a, const Matrix<TConfig> &m, int tag);
         void exchange_vectors(BVector_Array &a, const Matrix<TConfig> &m, int tag);
 
         bool exchange_halo_query(DVector &b, const Matrix<TConfig> &m, cudaEvent_t event);
         bool exchange_halo_query(FVector &b, const Matrix<TConfig> &m, cudaEvent_t event);
+#ifdef ENABLE_COMPLEX
         bool exchange_halo_query(CVector &b, const Matrix<TConfig> &m, cudaEvent_t event);
         bool exchange_halo_query(ZVector &b, const Matrix<TConfig> &m, cudaEvent_t event);
+#endif
         bool exchange_halo_query(IVector &b, const Matrix<TConfig> &m, cudaEvent_t event);
         bool exchange_halo_query(BVector &b, const Matrix<TConfig> &m, cudaEvent_t event);
         bool exchange_halo_query(I64Vector &b, const Matrix<TConfig> &m, cudaEvent_t event);
@@ -428,11 +450,12 @@ class CommsMPIHostBufferStream : public CommsMPI<T_Config>
         void send_vector(HDVector &a, int destination, int tag, int offset = 0, int size = -1);
         void send_vector(DFVector &a, int destination, int tag, int offset = 0, int size = -1);
         void send_vector(HFVector &a, int destination, int tag, int offset = 0, int size = -1);
+#ifdef ENABLE_COMPLEX
         void send_vector(DCVector &a, int destination, int tag, int offset = 0, int size = -1);
         void send_vector(HCVector &a, int destination, int tag, int offset = 0, int size = -1);
         void send_vector(DZVector &a, int destination, int tag, int offset = 0, int size = -1);
         void send_vector(HZVector &a, int destination, int tag, int offset = 0, int size = -1);
-
+#endif
 
         void send_vector_async(DIVector &a, int destination, int tag, int offset = 0, int size = -1);
         void send_vector_async(HIVector &a, int destination, int tag, int offset = 0, int size = -1);
@@ -440,10 +463,12 @@ class CommsMPIHostBufferStream : public CommsMPI<T_Config>
         void send_vector_async(HDVector &a, int destination, int tag, int offset = 0, int size = -1);
         void send_vector_async(DFVector &a, int destination, int tag, int offset = 0, int size = -1);
         void send_vector_async(HFVector &a, int destination, int tag, int offset = 0, int size = -1);
+#ifdef ENABLE_COMPLEX
         void send_vector_async(DCVector &a, int destination, int tag, int offset = 0, int size = -1);
         void send_vector_async(HCVector &a, int destination, int tag, int offset = 0, int size = -1);
         void send_vector_async(DZVector &a, int destination, int tag, int offset = 0, int size = -1);
         void send_vector_async(HZVector &a, int destination, int tag, int offset = 0, int size = -1);
+#endif
 
         void send_vector_wait_all(DIVector &a);
         void send_vector_wait_all(HIVector &a);
@@ -451,10 +476,12 @@ class CommsMPIHostBufferStream : public CommsMPI<T_Config>
         void send_vector_wait_all(HDVector &a);
         void send_vector_wait_all(DFVector &a);
         void send_vector_wait_all(HFVector &a);
+#ifdef ENABLE_COMPLEX
         void send_vector_wait_all(DCVector &a);
         void send_vector_wait_all(HCVector &a);
         void send_vector_wait_all(DZVector &a);
         void send_vector_wait_all(HZVector &a);
+#endif
 
         void recv_vector(DIVector &a, int source, int tag, int offset = 0, int size = -1);
         void recv_vector(HIVector &a, int source, int tag, int offset = 0, int size = -1);
@@ -462,11 +489,12 @@ class CommsMPIHostBufferStream : public CommsMPI<T_Config>
         void recv_vector(HDVector &a, int source, int tag, int offset = 0, int size = -1);
         void recv_vector(DFVector &a, int source, int tag, int offset = 0, int size = -1);
         void recv_vector(HFVector &a, int source, int tag, int offset = 0, int size = -1);
+#ifdef ENABLE_COMPLEX
         void recv_vector(DCVector &a, int source, int tag, int offset = 0, int size = -1);
         void recv_vector(HCVector &a, int source, int tag, int offset = 0, int size = -1);
         void recv_vector(DZVector &a, int source, int tag, int offset = 0, int size = -1);
         void recv_vector(HZVector &a, int source, int tag, int offset = 0, int size = -1);
-
+#endif
 
         void recv_vector_async(DIVector &a, int source, int tag, int offset = 0, int size = -1);
         void recv_vector_async(HIVector &a, int source, int tag, int offset = 0, int size = -1);
@@ -474,10 +502,12 @@ class CommsMPIHostBufferStream : public CommsMPI<T_Config>
         void recv_vector_async(HDVector &a, int source, int tag, int offset = 0, int size = -1);
         void recv_vector_async(DFVector &a, int source, int tag, int offset = 0, int size = -1);
         void recv_vector_async(HFVector &a, int source, int tag, int offset = 0, int size = -1);
+#ifdef ENABLE_COMPLEX
         void recv_vector_async(DCVector &a, int source, int tag, int offset = 0, int size = -1);
         void recv_vector_async(HCVector &a, int source, int tag, int offset = 0, int size = -1);
         void recv_vector_async(DZVector &a, int source, int tag, int offset = 0, int size = -1);
         void recv_vector_async(HZVector &a, int source, int tag, int offset = 0, int size = -1);
+#endif
 
         void recv_vector_wait_all(DIVector &a);
         void recv_vector_wait_all(HIVector &a);
@@ -485,10 +515,12 @@ class CommsMPIHostBufferStream : public CommsMPI<T_Config>
         void recv_vector_wait_all(HDVector &a);
         void recv_vector_wait_all(DFVector &a);
         void recv_vector_wait_all(HFVector &a);
+#ifdef ENABLE_COMPLEX
         void recv_vector_wait_all(DCVector &a);
         void recv_vector_wait_all(HCVector &a);
         void recv_vector_wait_all(DZVector &a);
         void recv_vector_wait_all(HZVector &a);
+#endif
 
         void send_raw_data(const void *ptr, int size, int destination, int tag);
         void recv_raw_data(void *ptr, int size, int source, int tag);

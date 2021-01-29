@@ -291,6 +291,7 @@ int main(int argc, const char **argv)
         {
             mode = AMGX_mode_dFFI;
         }
+#ifdef ENABLE_COMPLEX
         else if (strncmp(argv[pidx + 1], "hCCI", 100) == 0)
         {
             mode = AMGX_mode_hZZI;
@@ -315,6 +316,7 @@ int main(int argc, const char **argv)
         {
             mode = AMGX_mode_dZZI;
         }
+#endif
         else
         {
             errAndExit("ERROR: invalid mode");

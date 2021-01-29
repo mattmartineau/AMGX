@@ -61,6 +61,7 @@ template void sort<Vector<TemplateConfig<AMGX_device, AMGX_vecUInt64, AMGX_matDo
 
 template void sort<Vector<TemplateConfig<AMGX_host, AMGX_vecUInt64, AMGX_matDouble, AMGX_indInt> > >(Vector<TemplateConfig<AMGX_host, AMGX_vecUInt64, AMGX_matDouble, AMGX_indInt> > &v);
 
+#ifdef ENABLE_COMPLEX
 template void sort<Vector<TemplateConfig<AMGX_device, AMGX_vecUInt64, AMGX_matComplex, AMGX_indInt> > >(Vector<TemplateConfig<AMGX_device, AMGX_vecUInt64, AMGX_matComplex, AMGX_indInt> > &v);
 
 template void sort<Vector<TemplateConfig<AMGX_host, AMGX_vecUInt64, AMGX_matComplex, AMGX_indInt> > >(Vector<TemplateConfig<AMGX_host, AMGX_vecUInt64, AMGX_matComplex, AMGX_indInt> > &v);
@@ -68,5 +69,6 @@ template void sort<Vector<TemplateConfig<AMGX_host, AMGX_vecUInt64, AMGX_matComp
 template void sort<Vector<TemplateConfig<AMGX_device, AMGX_vecUInt64, AMGX_matDoubleComplex, AMGX_indInt> > >(Vector<TemplateConfig<AMGX_device, AMGX_vecUInt64, AMGX_matDoubleComplex, AMGX_indInt> > &v);
 
 template void sort<Vector<TemplateConfig<AMGX_host, AMGX_vecUInt64, AMGX_matDoubleComplex, AMGX_indInt> > >(Vector<TemplateConfig<AMGX_host, AMGX_vecUInt64, AMGX_matDoubleComplex, AMGX_indInt> > &v);
+#endif
 
 } // namespace amgx

@@ -1029,6 +1029,7 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::exchange_halo_wait(FVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t stream) {      do_exchange_halo_wait(b, m, stream);}
 
 
+#ifdef ENABLE_COMPLEX
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::setup(ZVector &b, const Matrix<TConfig> &m, int tag, int num_rings) { do_setup(b, m, num_rings);}
 template <class T_Config>
@@ -1046,6 +1047,7 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::exchange_halo_async(CVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t stream) {     do_exchange_halo_async(b, m, event, tag, stream);}
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::exchange_halo_wait(CVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t stream) {      do_exchange_halo_wait(b, m, stream);}
+#endif
 
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::setup(IVector &b, const Matrix<TConfig> &m, int tag, int num_rings) { do_setup(b, m, num_rings);}
@@ -1080,10 +1082,12 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::setup_L2H(IVector &b, Matrix<TConfig> &m, int num_rings) { do_setup_L2H(b, m, num_rings);}
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::setup_L2H(FVector &b, Matrix<TConfig> &m, int num_rings) { do_setup_L2H(b, m, num_rings);}
+#ifdef ENABLE_COMPLEX
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::setup_L2H(CVector &b, Matrix<TConfig> &m, int num_rings) { do_setup_L2H(b, m, num_rings);}
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::setup_L2H(ZVector &b, Matrix<TConfig> &m, int num_rings) { do_setup_L2H(b, m, num_rings);}
+#endif
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::setup_L2H(BVector &b, Matrix<TConfig> &m, int num_rings) { do_setup_L2H(b, m, num_rings);}
 template <class T_Config>
@@ -1104,6 +1108,7 @@ void CommsMPIHostBufferStream<T_Config>::send_receive_wait(FVector &b, const Mat
 {
     do_send_receive_wait(b, m, event, tag, stream);
 }
+#ifdef ENABLE_COMPLEX
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_receive_wait(CVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t &stream)
 {
@@ -1114,6 +1119,7 @@ void CommsMPIHostBufferStream<T_Config>::send_receive_wait(ZVector &b, const Mat
 {
     do_send_receive_wait(b, m, event, tag, stream);
 }
+#endif
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_receive_wait(BVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t &stream)
 {
@@ -1129,10 +1135,12 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::add_from_halo(DVector &b, const Matrix<TConfig> &m, int tag, int num_rings, cudaStream_t &stream) {           do_add_from_halo(b, m, num_rings, stream);}
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::add_from_halo(FVector &b, const Matrix<TConfig> &m, int tag, int num_rings, cudaStream_t &stream) {           do_add_from_halo(b, m, num_rings, stream);}
+#ifdef ENABLE_COMPLEX
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::add_from_halo(CVector &b, const Matrix<TConfig> &m, int tag, int num_rings, cudaStream_t &stream) {           do_add_from_halo(b, m, num_rings, stream);}
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::add_from_halo(ZVector &b, const Matrix<TConfig> &m, int tag, int num_rings, cudaStream_t &stream) {           do_add_from_halo(b, m, num_rings, stream);}
+#endif
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::add_from_halo(IVector &b, const Matrix<TConfig> &m, int tag, int num_rings, cudaStream_t &stream) {           do_add_from_halo(b, m, num_rings, stream);}
 
@@ -1148,6 +1156,7 @@ void CommsMPIHostBufferStream<T_Config>::gather_L2H(FVector &b, const Matrix<TCo
     do_gather_L2H(b, m, num_rings, stream);
 }
 
+#ifdef ENABLE_COMPLEX
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::gather_L2H(CVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream)
 {
@@ -1159,6 +1168,7 @@ void CommsMPIHostBufferStream<T_Config>::gather_L2H(ZVector &b, const Matrix<TCo
 {
     do_gather_L2H(b, m, num_rings, stream);
 }
+#endif
 
 
 template <class T_Config>
@@ -1179,6 +1189,7 @@ void CommsMPIHostBufferStream<T_Config>::gather_L2H_v2(FVector &b, const Matrix<
     do_gather_L2H_v2(b, m, num_rings, stream);;
 }
 
+#ifdef ENABLE_COMPLEX
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::gather_L2H_v2(CVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream)
 {
@@ -1190,6 +1201,7 @@ void CommsMPIHostBufferStream<T_Config>::gather_L2H_v2(ZVector &b, const Matrix<
 {
     do_gather_L2H_v2(b, m, num_rings, stream);;
 }
+#endif
 
 
 template <class T_Config>
@@ -1203,10 +1215,12 @@ template <class T_Config>
 bool CommsMPIHostBufferStream<T_Config>::exchange_halo_query(DVector &b, const Matrix<TConfig> &m, cudaEvent_t event) {      return do_exchange_halo_query(b, m); }
 template <class T_Config>
 bool CommsMPIHostBufferStream<T_Config>::exchange_halo_query(FVector &b, const Matrix<TConfig> &m, cudaEvent_t event) {      return do_exchange_halo_query(b, m); }
+#ifdef ENABLE_COMPLEX
 template <class T_Config>
 bool CommsMPIHostBufferStream<T_Config>::exchange_halo_query(CVector &b, const Matrix<TConfig> &m, cudaEvent_t event) {      return do_exchange_halo_query(b, m); }
 template <class T_Config>
 bool CommsMPIHostBufferStream<T_Config>::exchange_halo_query(ZVector &b, const Matrix<TConfig> &m, cudaEvent_t event) {      return do_exchange_halo_query(b, m); }
+#endif
 template <class T_Config>
 bool CommsMPIHostBufferStream<T_Config>::exchange_halo_query(IVector &b, const Matrix<TConfig> &m, cudaEvent_t event) {      return do_exchange_halo_query(b, m); }
 template <class T_Config>
@@ -1218,10 +1232,12 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::global_reduce(HDVector_Array &a, HDVector &b, const Operator<TConfig> &m, int tag) {   do_reduction(a, b, m);};
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::global_reduce(HFVector_Array &a, HFVector &b, const Operator<TConfig> &m, int tag) {   do_reduction(a, b, m);};
+#ifdef ENABLE_COMPLEX
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::global_reduce(HCVector_Array &a, HCVector &b, const Operator<TConfig> &m, int tag) {   do_reduction(a, b, m);};
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::global_reduce(HZVector_Array &a, HZVector &b, const Operator<TConfig> &m, int tag) {   do_reduction(a, b, m);};
+#endif
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::global_reduce(HIVector_Array &a, HIVector &b, const Operator<TConfig> &m, int tag) {   do_reduction(a, b, m);};
 template <class T_Config>
@@ -1249,6 +1265,7 @@ void CommsMPIHostBufferStream<T_Config>::global_reduce_sum(HFVector &a, HFVector
 #endif
 };
 
+#ifdef ENABLE_COMPLEX
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::global_reduce_sum(HCVector &a, HCVector &b, const Matrix<TConfig> &m, int tag)
 {
@@ -1260,6 +1277,7 @@ void CommsMPIHostBufferStream<T_Config>::global_reduce_sum(HZVector &a, HZVector
 {
     FatalError("MPI sum reduce is now supported with complex types", AMGX_ERR_NOT_IMPLEMENTED);
 };
+#endif
 
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::global_reduce_sum(HIVector &a, HIVector &b, const Matrix<TConfig> &m, int tag)
@@ -1285,10 +1303,12 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::exchange_vectors(DVector_Array &a, const Matrix<TConfig> &m, int tag) {              do_vec_exchange(a, m);};
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::exchange_vectors(FVector_Array &a, const Matrix<TConfig> &m, int tag) {              do_vec_exchange(a, m);};
+#ifdef ENABLE_COMPLEX
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::exchange_vectors(CVector_Array &a, const Matrix<TConfig> &m, int tag) {              do_vec_exchange(a, m);};
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::exchange_vectors(ZVector_Array &a, const Matrix<TConfig> &m, int tag) {              do_vec_exchange(a, m);};
+#endif
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::exchange_vectors(IVector_Array &a, const Matrix<TConfig> &m, int tag) {              do_vec_exchange(a, m);};
 template <class T_Config>
@@ -1306,6 +1326,7 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_vector(DFVector &a, int destination, int tag, int offset, int size) { send_vec(a, destination, tag, offset, size);};
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_vector(HFVector &a, int destination, int tag, int offset, int size) { send_vec(a, destination, tag, offset, size);};
+#ifdef ENABLE_COMPLEX
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_vector(DCVector &a, int destination, int tag, int offset, int size) { send_vec(a, destination, tag, offset, size);};
 template <class T_Config>
@@ -1314,6 +1335,7 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_vector(DZVector &a, int destination, int tag, int offset, int size) { send_vec(a, destination, tag, offset, size);};
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_vector(HZVector &a, int destination, int tag, int offset, int size) { send_vec(a, destination, tag, offset, size);};
+#endif
 
 
 template <class T_Config>
@@ -1328,6 +1350,7 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_vector_async(DFVector &a, int destination, int tag, int offset, int size) { send_vec_async(a, destination, tag, offset, size);};
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_vector_async(HFVector &a, int destination, int tag, int offset, int size) { send_vec_async(a, destination, tag, offset, size);};
+#ifdef ENABLE_COMPLEX
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_vector_async(DCVector &a, int destination, int tag, int offset, int size) { send_vec_async(a, destination, tag, offset, size);};
 template <class T_Config>
@@ -1336,6 +1359,7 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_vector_async(DZVector &a, int destination, int tag, int offset, int size) { send_vec_async(a, destination, tag, offset, size);};
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_vector_async(HZVector &a, int destination, int tag, int offset, int size) { send_vec_async(a, destination, tag, offset, size);};
+#endif
 
 
 template <class T_Config>
@@ -1350,6 +1374,7 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_vector_wait_all(DFVector &a) { send_vec_wait_all(a);};
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_vector_wait_all(HFVector &a) { send_vec_wait_all(a);};
+#ifdef ENABLE_COMPLEX
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_vector_wait_all(DCVector &a) { send_vec_wait_all(a);};
 template <class T_Config>
@@ -1358,6 +1383,7 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_vector_wait_all(DZVector &a) { send_vec_wait_all(a);};
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::send_vector_wait_all(HZVector &a) { send_vec_wait_all(a);};
+#endif
 
 
 template <class T_Config>
@@ -1372,6 +1398,7 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::recv_vector(DFVector &a, int source, int tag, int offset, int size) { recv_vec(a, source, tag, offset, size);};
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::recv_vector(HFVector &a, int source, int tag, int offset, int size) { recv_vec(a, source, tag, offset, size);};
+#ifdef ENABLE_COMPLEX
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::recv_vector(DCVector &a, int source, int tag, int offset, int size) { recv_vec(a, source, tag, offset, size);};
 template <class T_Config>
@@ -1380,6 +1407,7 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::recv_vector(DZVector &a, int source, int tag, int offset, int size) { recv_vec(a, source, tag, offset, size);};
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::recv_vector(HZVector &a, int source, int tag, int offset, int size) { recv_vec(a, source, tag, offset, size);};
+#endif
 
 
 template <class T_Config>
@@ -1394,6 +1422,7 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::recv_vector_async(DFVector &a, int source, int tag, int offset, int size) { recv_vec_async(a, source, tag, offset, size);};
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::recv_vector_async(HFVector &a, int source, int tag, int offset, int size) { recv_vec_async(a, source, tag, offset, size);};
+#ifdef ENABLE_COMPLEX
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::recv_vector_async(DCVector &a, int source, int tag, int offset, int size) { recv_vec_async(a, source, tag, offset, size);};
 template <class T_Config>
@@ -1402,6 +1431,7 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::recv_vector_async(DZVector &a, int source, int tag, int offset, int size) { recv_vec_async(a, source, tag, offset, size);};
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::recv_vector_async(HZVector &a, int source, int tag, int offset, int size) { recv_vec_async(a, source, tag, offset, size);};
+#endif
 
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::recv_vector_wait_all(DIVector &a) { recv_vec_wait_all(a);};
@@ -1415,6 +1445,7 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::recv_vector_wait_all(DFVector &a) { recv_vec_wait_all(a);};
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::recv_vector_wait_all(HFVector &a) { recv_vec_wait_all(a);};
+#ifdef ENABLE_COMPLEX
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::recv_vector_wait_all(DCVector &a) { recv_vec_wait_all(a);};
 template <class T_Config>
@@ -1423,6 +1454,7 @@ template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::recv_vector_wait_all(DZVector &a) { recv_vec_wait_all(a);};
 template <class T_Config>
 void CommsMPIHostBufferStream<T_Config>::recv_vector_wait_all(HZVector &a) { recv_vec_wait_all(a);};
+#endif
 
 template <class T_Config>
 int CommsMPIHostBufferStream<T_Config>::get_num_partitions()

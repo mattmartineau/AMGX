@@ -26,8 +26,10 @@
  */
 
 #include <solvers/pcg_solver.h>
+#include <specific_spmv.h>
 #include <blas.h>
 #include <util.h>
+#include <sm_utils.inl>
 
 namespace amgx
 {

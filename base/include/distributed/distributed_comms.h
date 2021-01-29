@@ -65,6 +65,7 @@ class DistributedComms
         typedef Vector<fvec_value_type> FVector;
         typedef std::vector<FVector> FVector_Array;
 
+#ifdef ENABLE_COMPLEX
         typedef TemplateConfig<TConfig::memSpace, AMGX_vecComplex, TConfig::matPrec, TConfig::indPrec> cvec_value_type;
         typedef Vector<cvec_value_type> CVector;
         typedef std::vector<CVector> CVector_Array;
@@ -72,6 +73,7 @@ class DistributedComms
         typedef TemplateConfig<TConfig::memSpace, AMGX_vecDoubleComplex, TConfig::matPrec, TConfig::indPrec> zvec_value_type;
         typedef Vector<zvec_value_type> ZVector;
         typedef std::vector<ZVector> ZVector_Array;
+#endif
 
         typedef TemplateConfig<TConfig::memSpace, AMGX_vecInt, TConfig::matPrec, TConfig::indPrec> ivec_value_type;
         typedef typename TConfig_h::template setVecPrec<AMGX_vecInt>::Type ivec_value_type_h;
@@ -105,6 +107,7 @@ class DistributedComms
         typedef Vector<hfvec_value_type> HFVector;
         typedef std::vector<HFVector> HFVector_Array;
 
+#ifdef ENABLE_COMPLEX
         typedef typename TConfig_h::template setVecPrec<AMGX_vecComplex>::Type hcvec_value_type;
         typedef Vector<hcvec_value_type> HCVector;
         typedef std::vector<HCVector> HCVector_Array;
@@ -112,6 +115,7 @@ class DistributedComms
         typedef typename TConfig_h::template setVecPrec<AMGX_vecDoubleComplex>::Type hzvec_value_type;
         typedef Vector<hzvec_value_type> HZVector;
         typedef std::vector<HZVector> HZVector_Array;
+#endif
 
         typedef typename TConfig_h::template setVecPrec<AMGX_vecInt>::Type hivec_value_type;
         typedef Vector<hivec_value_type> HIVector;
@@ -127,10 +131,13 @@ class DistributedComms
         typedef Vector<dfvec_value_type> DFVector;
         typedef typename TConfig_d::template setVecPrec<AMGX_vecDouble>::Type ddvec_value_type;
         typedef Vector<ddvec_value_type> DDVector;
+
+#ifdef ENABLE_COMPLEX
         typedef typename TConfig_d::template setVecPrec<AMGX_vecComplex>::Type dcvec_value_type;
         typedef Vector<dcvec_value_type> DCVector;
         typedef typename TConfig_d::template setVecPrec<AMGX_vecDoubleComplex>::Type dzvec_value_type;
         typedef Vector<dzvec_value_type> DZVector;
+#endif
 
         typedef typename TConfig_h::template setVecPrec<AMGX_vecBool>::Type hbvec_value_type;
         typedef Vector<hbvec_value_type> HBVector;
@@ -160,6 +167,7 @@ class DistributedComms
 
         virtual void exchange_matrix_halo(Matrix_Array &halo_rows, DistributedManager_Array &halo_btl, const Matrix<TConfig> &m) = 0;
         virtual void exchange_matrix_halo(IVector_Array &row_offsets, I64Vector_Array &col_indices, MVector_Array &values, I64Vector_Array &halo_row_ids, IVector_h &neighbors_list, int global_id) = 0;
+
         // external double vector
         virtual void setup(DVector &b, const Matrix<TConfig> &m, int tag, int num_rings = 1) = 0;
         virtual void setup_L2H(DVector &b, Matrix<TConfig> &m, int num_rings = 1) = 0;
@@ -168,7 +176,8 @@ class DistributedComms
         virtual void send_receive_wait(DVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t &stream) = 0;
         virtual void exchange_halo_wait(DVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t stream = NULL) = 0;
         virtual bool exchange_halo_query(DVector &b, const Matrix<TConfig> &m, cudaEvent_t event) = 0;
-        // external flout vector
+
+        // external float vector
         virtual void setup(FVector &b, const Matrix<TConfig> &m, int tag, int num_rings = 1) = 0;
         virtual void setup_L2H(FVector &b, Matrix<TConfig> &m, int num_rings = 1) = 0;
         virtual void exchange_halo(FVector &b, const Matrix<TConfig> &m, int tag, int num_rings = 1) = 0;
@@ -176,6 +185,8 @@ class DistributedComms
         virtual void send_receive_wait(FVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t &stream) = 0;
         virtual void exchange_halo_wait(FVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t stream = NULL) = 0;
         virtual bool exchange_halo_query(FVector &b, const Matrix<TConfig> &m, cudaEvent_t event) = 0;
+
+#ifdef ENABLE_COMPLEX
         // external complex vector
         virtual void setup(CVector &b, const Matrix<TConfig> &m, int tag, int num_rings = 1) = 0;
         virtual void setup_L2H(CVector &b, Matrix<TConfig> &m, int num_rings = 1) = 0;
@@ -184,6 +195,7 @@ class DistributedComms
         virtual void send_receive_wait(CVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t &stream) = 0;
         virtual void exchange_halo_wait(CVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t stream = NULL) = 0;
         virtual bool exchange_halo_query(CVector &b, const Matrix<TConfig> &m, cudaEvent_t event) = 0;
+
         // external double complex vector
         virtual void setup(ZVector &b, const Matrix<TConfig> &m, int tag, int num_rings = 1) = 0;
         virtual void setup_L2H(ZVector &b, Matrix<TConfig> &m, int num_rings = 1) = 0;
@@ -192,6 +204,8 @@ class DistributedComms
         virtual void send_receive_wait(ZVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t &stream) = 0;
         virtual void exchange_halo_wait(ZVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t stream = NULL) = 0;
         virtual bool exchange_halo_query(ZVector &b, const Matrix<TConfig> &m, cudaEvent_t event) = 0;
+#endif
+
         // external int vector
         virtual void setup(IVector &b, const Matrix<TConfig> &m, int tag, int num_rings = 1) = 0;
         virtual void setup_L2H(IVector &b, Matrix<TConfig> &m, int num_rings = 1) = 0;
@@ -200,6 +214,7 @@ class DistributedComms
         virtual void send_receive_wait(IVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t &stream) = 0;
         virtual void exchange_halo_wait(IVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t stream = NULL) = 0;
         virtual bool exchange_halo_query(IVector &b, const Matrix<TConfig> &m, cudaEvent_t event) = 0;
+
         // external boolean vector
         virtual void setup(BVector &b, const Matrix<TConfig> &m, int tag, int num_rings = 1) = 0;
         virtual void setup_L2H(BVector &b, Matrix<TConfig> &m, int num_rings = 1) = 0;
@@ -208,6 +223,7 @@ class DistributedComms
         virtual void send_receive_wait(BVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t &stream) = 0;
         virtual void exchange_halo_wait(BVector &b, const Matrix<TConfig> &m, cudaEvent_t event, int tag, cudaStream_t stream = NULL) = 0;
         virtual bool exchange_halo_query(BVector &b, const Matrix<TConfig> &m, cudaEvent_t event) = 0;
+
         // external i64 vector
         virtual void setup(I64Vector &b, const Matrix<TConfig> &m, int tag, int num_rings = 1) = 0;
         virtual void setup_L2H(I64Vector &b, Matrix<TConfig> &m, int num_rings = 1) = 0;
@@ -220,41 +236,52 @@ class DistributedComms
         virtual void add_from_halo(IVector &b, const Matrix<TConfig> &m, int tag, int num_rings, cudaStream_t &stream) = 0;
         virtual void add_from_halo(DVector &b, const Matrix<TConfig> &m, int tag, int num_rings, cudaStream_t &stream) = 0;
         virtual void add_from_halo(FVector &b, const Matrix<TConfig> &m, int tag, int num_rings, cudaStream_t &stream) = 0;
+#ifdef ENABLE_COMPLEX
         virtual void add_from_halo(ZVector &b, const Matrix<TConfig> &m, int tag, int num_rings, cudaStream_t &stream) = 0;
         virtual void add_from_halo(CVector &b, const Matrix<TConfig> &m, int tag, int num_rings, cudaStream_t &stream) = 0;
-
+#endif
 
         virtual void gather_L2H(IVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL) = 0;
         virtual void gather_L2H(DVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL) = 0;
         virtual void gather_L2H(FVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL) = 0;
+#ifdef ENABLE_COMPLEX
         virtual void gather_L2H(CVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL) = 0;
         virtual void gather_L2H(ZVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL) = 0;
+#endif
 
         virtual void gather_L2H_v2(IVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL) = 0;
         virtual void gather_L2H_v2(DVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL) = 0;
         virtual void gather_L2H_v2(FVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL) = 0;
+#ifdef ENABLE_COMPLEX
         virtual void gather_L2H_v2(CVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL) = 0;
         virtual void gather_L2H_v2(ZVector &b, const Matrix<TConfig> &m, int num_rings, cudaStream_t stream = NULL) = 0;
+#endif
 
         virtual void global_reduce(HDVector_Array &a, HDVector &b, const Operator<TConfig> &m, int tag) = 0;
         virtual void global_reduce(HFVector_Array &a, HFVector &b, const Operator<TConfig> &m, int tag) = 0;
+#ifdef ENABLE_COMPLEX
         virtual void global_reduce(HCVector_Array &a, HCVector &b, const Operator<TConfig> &m, int tag) = 0;
         virtual void global_reduce(HZVector_Array &a, HZVector &b, const Operator<TConfig> &m, int tag) = 0;
+#endif
         virtual void global_reduce(HIVector_Array &a, HIVector &b, const Operator<TConfig> &m, int tag) = 0;
         virtual void global_reduce(HBVector_Array &a, HBVector &b, const Operator<TConfig> &m, int tag) = 0;
         virtual void global_reduce(HI64Vector_Array &a, HI64Vector &b, const Operator<TConfig> &m, int tag) = 0;
 
         virtual void global_reduce_sum(HDVector &a, HDVector &b, const Matrix<TConfig> &m, int tag) = 0;
         virtual void global_reduce_sum(HFVector &a, HFVector &b, const Matrix<TConfig> &m, int tag) = 0;
+#ifdef ENABLE_COMPLEX
         virtual void global_reduce_sum(HCVector &a, HCVector &b, const Matrix<TConfig> &m, int tag) = 0;
         virtual void global_reduce_sum(HZVector &a, HZVector &b, const Matrix<TConfig> &m, int tag) = 0;
+#endif
         virtual void global_reduce_sum(HIVector &a, HIVector &b, const Matrix<TConfig> &m, int tag) = 0;
         virtual void global_reduce_sum(HI64Vector &a, HI64Vector &b, const Matrix<TConfig> &m, int tag) = 0;
 
         virtual void exchange_vectors(DVector_Array &a, const Matrix<TConfig> &m, int tag) = 0;
         virtual void exchange_vectors(FVector_Array &a, const Matrix<TConfig> &m, int tag) = 0;
+#ifdef ENABLE_COMPLEX
         virtual void exchange_vectors(CVector_Array &a, const Matrix<TConfig> &m, int tag) = 0;
         virtual void exchange_vectors(ZVector_Array &a, const Matrix<TConfig> &m, int tag) = 0;
+#endif
         virtual void exchange_vectors(IVector_Array &a, const Matrix<TConfig> &m, int tag) = 0;
         virtual void exchange_vectors(BVector_Array &a, const Matrix<TConfig> &m, int tag) = 0;
 
@@ -264,10 +291,12 @@ class DistributedComms
         virtual void send_vector(HDVector &a, int destination, int tag, int offset = 0, int size = -1) = 0;
         virtual void send_vector(DFVector &a, int destination, int tag, int offset = 0, int size = -1) = 0;
         virtual void send_vector(HFVector &a, int destination, int tag, int offset = 0, int size = -1) = 0;
+#ifdef ENABLE_COMPLEX
         virtual void send_vector(DCVector &a, int destination, int tag, int offset = 0, int size = -1) = 0;
         virtual void send_vector(HCVector &a, int destination, int tag, int offset = 0, int size = -1) = 0;
         virtual void send_vector(DZVector &a, int destination, int tag, int offset = 0, int size = -1) = 0;
         virtual void send_vector(HZVector &a, int destination, int tag, int offset = 0, int size = -1) = 0;
+#endif
 
 
         virtual void send_vector_async(DIVector &a, int destination, int tag, int offset = 0, int size = -1) = 0;
@@ -276,10 +305,12 @@ class DistributedComms
         virtual void send_vector_async(HDVector &a, int destination, int tag, int offset = 0, int size = -1) = 0;
         virtual void send_vector_async(DFVector &a, int destination, int tag, int offset = 0, int size = -1) = 0;
         virtual void send_vector_async(HFVector &a, int destination, int tag, int offset = 0, int size = -1) = 0;
+#ifdef ENABLE_COMPLEX
         virtual void send_vector_async(DCVector &a, int destination, int tag, int offset = 0, int size = -1) = 0;
         virtual void send_vector_async(HCVector &a, int destination, int tag, int offset = 0, int size = -1) = 0;
         virtual void send_vector_async(DZVector &a, int destination, int tag, int offset = 0, int size = -1) = 0;
         virtual void send_vector_async(HZVector &a, int destination, int tag, int offset = 0, int size = -1) = 0;
+#endif
 
         virtual void send_vector_wait_all(DIVector &a) = 0;
         virtual void send_vector_wait_all(HIVector &a) = 0;
@@ -287,10 +318,12 @@ class DistributedComms
         virtual void send_vector_wait_all(HDVector &a) = 0;
         virtual void send_vector_wait_all(DFVector &a) = 0;
         virtual void send_vector_wait_all(HFVector &a) = 0;
+#ifdef ENABLE_COMPLEX
         virtual void send_vector_wait_all(DCVector &a) = 0;
         virtual void send_vector_wait_all(HCVector &a) = 0;
         virtual void send_vector_wait_all(DZVector &a) = 0;
         virtual void send_vector_wait_all(HZVector &a) = 0;
+#endif
 
         virtual void recv_vector(DIVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
         virtual void recv_vector(HIVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
@@ -298,10 +331,12 @@ class DistributedComms
         virtual void recv_vector(HDVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
         virtual void recv_vector(DFVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
         virtual void recv_vector(HFVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
+#ifdef ENABLE_COMPLEX
         virtual void recv_vector(DCVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
         virtual void recv_vector(HCVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
         virtual void recv_vector(DZVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
         virtual void recv_vector(HZVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
+#endif
 
         virtual void recv_vector_async(DIVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
         virtual void recv_vector_async(HIVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
@@ -309,10 +344,12 @@ class DistributedComms
         virtual void recv_vector_async(HDVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
         virtual void recv_vector_async(DFVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
         virtual void recv_vector_async(HFVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
+#ifdef ENABLE_COMPLEX
         virtual void recv_vector_async(DCVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
         virtual void recv_vector_async(HCVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
         virtual void recv_vector_async(DZVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
         virtual void recv_vector_async(HZVector &a, int source, int tag, int offset = 0, int size = -1) = 0;
+#endif
 
         virtual void recv_vector_wait_all(DIVector &a) = 0;
         virtual void recv_vector_wait_all(HIVector &a) = 0;
@@ -320,10 +357,12 @@ class DistributedComms
         virtual void recv_vector_wait_all(HDVector &a) = 0;
         virtual void recv_vector_wait_all(DFVector &a) = 0;
         virtual void recv_vector_wait_all(HFVector &a) = 0;
+#ifdef ENABLE_COMPLEX
         virtual void recv_vector_wait_all(DCVector &a) = 0;
         virtual void recv_vector_wait_all(HCVector &a) = 0;
         virtual void recv_vector_wait_all(DZVector &a) = 0;
         virtual void recv_vector_wait_all(HZVector &a) = 0;
+#endif
 
         virtual int get_num_partitions() = 0;
         virtual int get_global_id() = 0;
@@ -363,11 +402,13 @@ class DistributedCommsFactory
         DistributedComms< TemplateConfig<AMGX_host, AMGX_vecInt, AMGX_matDouble, AMGX_indInt> > *m_hidi;
         DistributedComms< TemplateConfig<AMGX_host, AMGX_vecInt, AMGX_matFloat, AMGX_indInt> > *m_hifi;
 
+#ifdef ENABLE_COMPLEX
         DistributedComms< TemplateConfig<AMGX_host, AMGX_vecDoubleComplex, AMGX_matDoubleComplex, AMGX_indInt> > *m_hzzi;
         DistributedComms< TemplateConfig<AMGX_host, AMGX_vecDoubleComplex, AMGX_matComplex, AMGX_indInt> > *m_hzci;
         DistributedComms< TemplateConfig<AMGX_host, AMGX_vecComplex, AMGX_matComplex, AMGX_indInt> > *m_hcci;
         DistributedComms< TemplateConfig<AMGX_host, AMGX_vecInt, AMGX_matComplex, AMGX_indInt> > *m_hizi;
         DistributedComms< TemplateConfig<AMGX_host, AMGX_vecInt, AMGX_matDoubleComplex, AMGX_indInt> > *m_hici;
+#endif
 
         DistributedComms< TemplateConfig<AMGX_device, AMGX_vecDouble, AMGX_matDouble, AMGX_indInt> > *m_dddi;
         DistributedComms< TemplateConfig<AMGX_device, AMGX_vecDouble, AMGX_matFloat, AMGX_indInt> > *m_ddfi;
@@ -375,15 +416,23 @@ class DistributedCommsFactory
         DistributedComms< TemplateConfig<AMGX_device, AMGX_vecInt, AMGX_matDouble, AMGX_indInt> > *m_didi;
         DistributedComms< TemplateConfig<AMGX_device, AMGX_vecInt, AMGX_matFloat, AMGX_indInt> > *m_difi;
 
+#ifdef ENABLE_COMPLEX
         DistributedComms< TemplateConfig<AMGX_device, AMGX_vecDoubleComplex, AMGX_matDoubleComplex, AMGX_indInt> > *m_dzzi;
         DistributedComms< TemplateConfig<AMGX_device, AMGX_vecDoubleComplex, AMGX_matComplex, AMGX_indInt> > *m_dzci;
         DistributedComms< TemplateConfig<AMGX_device, AMGX_vecComplex, AMGX_matComplex, AMGX_indInt> > *m_dcci;
         DistributedComms< TemplateConfig<AMGX_device, AMGX_vecInt, AMGX_matComplex, AMGX_indInt> > *m_dizi;
         DistributedComms< TemplateConfig<AMGX_device, AMGX_vecInt, AMGX_matDoubleComplex, AMGX_indInt> > *m_dici;
+#endif
 
     public:
-        DistributedCommsFactory() : m_hddi(NULL), m_hdfi(NULL), m_hffi(NULL), m_hidi(NULL), m_hifi(NULL), m_dddi(NULL), m_ddfi(NULL), m_dffi(NULL), m_didi(NULL), m_difi(NULL),
-            m_hzzi(NULL), m_hzci(NULL), m_hcci(NULL), m_hici(NULL), m_hizi(NULL), m_dzzi(NULL), m_dzci(NULL), m_dcci(NULL), m_dizi(NULL), m_dici(NULL) {};
+        DistributedCommsFactory() : m_hddi(NULL), m_hdfi(NULL), m_hffi(NULL), m_hidi(NULL), m_hifi(NULL)
+                                    ,m_dddi(NULL), m_ddfi(NULL), m_dffi(NULL), m_didi(NULL), m_difi(NULL)
+#ifdef ENABLE_COMPLEX
+                                    ,m_hzzi(NULL), m_hzci(NULL), m_hcci(NULL), m_hici(NULL), m_hizi(NULL)
+                                    ,m_dzzi(NULL), m_dzci(NULL), m_dcci(NULL), m_dizi(NULL), m_dici(NULL)
+#endif
+        {
+        };
 
         virtual DistributedComms< TemplateConfig<AMGX_host, AMGX_vecDouble, AMGX_matDouble, AMGX_indInt> > *getInstanceHDDI() = 0;
         virtual DistributedComms< TemplateConfig<AMGX_host, AMGX_vecDouble, AMGX_matFloat, AMGX_indInt> > *getInstanceHDFI() = 0;
@@ -391,23 +440,27 @@ class DistributedCommsFactory
         virtual DistributedComms< TemplateConfig<AMGX_host, AMGX_vecInt, AMGX_matDouble, AMGX_indInt> > *getInstanceHIDI() = 0;
         virtual DistributedComms< TemplateConfig<AMGX_host, AMGX_vecInt, AMGX_matFloat, AMGX_indInt> > *getInstanceHIFI() = 0;
 
+#ifdef ENABLE_COMPLEX
         virtual DistributedComms< TemplateConfig<AMGX_host, AMGX_vecDoubleComplex, AMGX_matDoubleComplex, AMGX_indInt> > *getInstanceHZZI() = 0;
         virtual DistributedComms< TemplateConfig<AMGX_host, AMGX_vecDoubleComplex, AMGX_matComplex, AMGX_indInt> > *getInstanceHZCI() = 0;
         virtual DistributedComms< TemplateConfig<AMGX_host, AMGX_vecComplex, AMGX_matComplex, AMGX_indInt> > *getInstanceHCCI() = 0;
         virtual DistributedComms< TemplateConfig<AMGX_host, AMGX_vecInt, AMGX_matDoubleComplex, AMGX_indInt> > *getInstanceHIZI() = 0;
         virtual DistributedComms< TemplateConfig<AMGX_host, AMGX_vecInt, AMGX_matComplex, AMGX_indInt> > *getInstanceHICI() = 0;
+#endif
 
-        virtual DistributedComms< TemplateConfig<AMGX_device, AMGX_vecDouble, AMGX_matDoubleComplex, AMGX_indInt> > *getInstanceDDDI() = 0;
-        virtual DistributedComms< TemplateConfig<AMGX_device, AMGX_vecDouble, AMGX_matComplex, AMGX_indInt> > *getInstanceDDFI() = 0;
-        virtual DistributedComms< TemplateConfig<AMGX_device, AMGX_vecFloat, AMGX_matComplex, AMGX_indInt> > *getInstanceDFFI() = 0;
-        virtual DistributedComms< TemplateConfig<AMGX_device, AMGX_vecInt, AMGX_matDoubleComplex, AMGX_indInt> > *getInstanceDIDI() = 0;
-        virtual DistributedComms< TemplateConfig<AMGX_device, AMGX_vecInt, AMGX_matComplex, AMGX_indInt> > *getInstanceDIFI() = 0;
+        virtual DistributedComms< TemplateConfig<AMGX_device, AMGX_vecDouble, AMGX_matDouble, AMGX_indInt> > *getInstanceDDDI() = 0;
+        virtual DistributedComms< TemplateConfig<AMGX_device, AMGX_vecDouble, AMGX_matFloat, AMGX_indInt> > *getInstanceDDFI() = 0;
+        virtual DistributedComms< TemplateConfig<AMGX_device, AMGX_vecFloat, AMGX_matFloat, AMGX_indInt> > *getInstanceDFFI() = 0;
+        virtual DistributedComms< TemplateConfig<AMGX_device, AMGX_vecInt, AMGX_matDouble, AMGX_indInt> > *getInstanceDIDI() = 0;
+        virtual DistributedComms< TemplateConfig<AMGX_device, AMGX_vecInt, AMGX_matFloat, AMGX_indInt> > *getInstanceDIFI() = 0;
 
+#ifdef ENABLE_COMPLEX
         virtual DistributedComms< TemplateConfig<AMGX_device, AMGX_vecDoubleComplex, AMGX_matDoubleComplex, AMGX_indInt> > *getInstanceDZZI() = 0;
         virtual DistributedComms< TemplateConfig<AMGX_device, AMGX_vecDoubleComplex, AMGX_matFloat, AMGX_indInt> > *getInstanceDZCI() = 0;
         virtual DistributedComms< TemplateConfig<AMGX_device, AMGX_vecComplex, AMGX_matFloat, AMGX_indInt> > *getInstanceDCCI() = 0;
         virtual DistributedComms< TemplateConfig<AMGX_device, AMGX_vecInt, AMGX_matDoubleComplex, AMGX_indInt> > *getInstanceDIZI() = 0;
         virtual DistributedComms< TemplateConfig<AMGX_device, AMGX_vecInt, AMGX_matComplex, AMGX_indInt> > *getInstanceDICI() = 0;
+#endif
 };
 
 } // namespace amgx

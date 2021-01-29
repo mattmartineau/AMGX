@@ -52,8 +52,10 @@ template class W_CycleDispatcher<AMGX_vecDouble, AMGX_matDouble, AMGX_indInt>;
 template class W_CycleDispatcher<AMGX_vecFloat, AMGX_matFloat, AMGX_indInt>;
 template class W_CycleDispatcher<AMGX_vecDouble, AMGX_matFloat, AMGX_indInt>;
 
+#ifdef ENABLE_COMPLEX
 template class W_CycleDispatcher<AMGX_vecComplex, AMGX_matComplex, AMGX_indInt>;
 template class W_CycleDispatcher<AMGX_vecDoubleComplex, AMGX_matComplex, AMGX_indInt>;
 template class W_CycleDispatcher<AMGX_vecDoubleComplex, AMGX_matDoubleComplex, AMGX_indInt>;
+#endif
 
 } // namespace amgx

@@ -52,6 +52,7 @@ Solver<TConfig>::Solver(AMG_Config &cfg, const std::string &cfg_scope,
         NULL), m_num_iters(0), m_curr_iter(0), m_ref_count(1), tag(0), m_solver_name(
             "SolverNameNotSet"), m_tmng(tmng)
 {
+    m_norm_factor = types::util<PODValueB>::get_one();
     m_verbosity_level = cfg.getParameter<int>("verbosity_level", cfg_scope);
     m_print_vis_data = cfg.getParameter<int>("print_vis_data", cfg_scope) != 0;
     m_monitor_residual = cfg.getParameter<int>("monitor_residual", cfg_scope) != 0;
@@ -213,6 +214,7 @@ void Solver<TConfig>::compute_residual(const VVector &b, VVector &x,
     m_A->apply(x, r);
     axpby(b, r, r, types::util<ValueTypeB>::get_one(), types::util<ValueTypeB>::get_minus_one(), offset, size);
 }
+
 template<class TConfig>
 void Solver<TConfig>::compute_norm()
 {
@@ -775,7 +777,8 @@ AMGX_STATUS Solver<TConfig>::solve(Vector<TConfig> &b, Vector<TConfig> &x,
     // Initialize convergence checker if needed.
     if (m_monitor_convergence)
     {
-        m_convergence->convergence_init();
+        Matrix<TConfig> *m_A =  dynamic_cast<Matrix<TConfig>*>(this->m_A);
+        m_convergence->convergence_init(*m_A, b, x);
         m_convergence->convergence_update_and_check(m_nrm, m_nrm_ini);
     }
 

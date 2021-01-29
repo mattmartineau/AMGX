@@ -111,6 +111,8 @@ class Solver : public AuxData
         void compute_norm();
         // Set the norm m_nrm.
         void set_norm( const PODVector_h &nrm );
+        // Set a norm factor to scale the norm
+        void set_norm_factor(const PODValueB& norm_factor) { this->m_norm_factor = norm_factor; }
         // Compute residual and decide convergence.
         bool converged( const VVector &b, VVector &x );
         // Decide convergence based m_nrm.
@@ -120,6 +122,7 @@ class Solver : public AuxData
         inline bool compute_norm_and_converged()
         {
             compute_norm();
+
             return converged();
         }
 
@@ -250,6 +253,7 @@ class Solver : public AuxData
         std::vector<PODVector_h> m_res_history;
         PODVector_h m_nrm;
         PODVector_h m_nrm_ini;
+        PODValueB m_norm_factor;
         bool m_use_scalar_norm;
 
         // Convergence object. To decide convergence.

@@ -246,7 +246,7 @@ void
 Matrix< TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indPrec> >::apply(const Vector<TConfig> &v, Vector<TConfig> &res, ViewType view)
 {
     Vector<TConfig> &v_ = const_cast<Vector<TConfig>&>(v);
-    multiply(*this, v_, res);
+    multiply(*this, v_, res, view);
 }
 
 
@@ -1183,11 +1183,11 @@ void reorderElementsDeviceCSR(INDEX_TYPE num_rows,
     thrust::device_ptr<INDEX_TYPE> dev_ptr = thrust::device_pointer_cast(row_offsets);
     INDEX_TYPE max_row_length = std::max(1, thrust::transform_reduce(dev_ptr, dev_ptr + num_rows, row_length<INDEX_TYPE>(), 0, thrust::maximum<INDEX_TYPE>()));
     //TODO: optimise this in terms of storage
-    INDEX_TYPE storage_space = 100 * 1024 * 1024 * sizeof(T) / sizeof(cuDoubleComplex); // because we allocate as for cuComplex
+    INDEX_TYPE storage_space = 100 * 1024 * 1024 * sizeof(T) / sizeof(double); // because we allocate as for double
     INDEX_TYPE blocks = 1500 < storage_space / (max_row_length * block_size * sizeof(T)) ? 1500 : storage_space / (max_row_length * block_size * sizeof(T));
     blocks = blocks < num_rows ? blocks : num_rows;
     INDEX_TYPE aligned_space = ((max_row_length * block_size * sizeof(T) / 128 + 1) * 128) / sizeof(T); //pad to 128 bytes
-    Vector<amgx::TemplateConfig<AMGX_device, AMGX_vecDoubleComplex, AMGX_matDoubleComplex, AMGX_indInt> > tempstorage(blocks * aligned_space);
+    Vector<amgx::TemplateConfig<AMGX_device, AMGX_vecDouble, AMGX_matDouble, AMGX_indInt> > tempstorage(blocks * aligned_space);
     reorderElements <<< blocks, 256>>>(num_rows, row_offsets, permutation, values, (T *)tempstorage.raw(), aligned_space, block_size);
     cudaCheckError();
 }
@@ -1195,8 +1195,10 @@ void reorderElementsDeviceCSR(INDEX_TYPE num_rows,
 // explicitly instantiate reorderElementsDeviceCSR, since we call it from header and it's not a part of some class
 template void reorderElementsDeviceCSR(INDEX_TYPE num_rows, INDEX_TYPE *row_offsets, INDEX_TYPE *permutation, INDEX_TYPE *col_indices, float *values, INDEX_TYPE block_size);
 template void reorderElementsDeviceCSR(INDEX_TYPE num_rows, INDEX_TYPE *row_offsets, INDEX_TYPE *permutation, INDEX_TYPE *col_indices, double *values, INDEX_TYPE block_size);
+#ifdef ENABLE_COMPLEX
 template void reorderElementsDeviceCSR(INDEX_TYPE num_rows, INDEX_TYPE *row_offsets, INDEX_TYPE *permutation, INDEX_TYPE *col_indices, cuComplex *values, INDEX_TYPE block_size);
 template void reorderElementsDeviceCSR(INDEX_TYPE num_rows, INDEX_TYPE *row_offsets, INDEX_TYPE *permutation, INDEX_TYPE *col_indices, cuDoubleComplex *values, INDEX_TYPE block_size);
+#endif
 
 
 /****************************************

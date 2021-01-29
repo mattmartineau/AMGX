@@ -49,7 +49,7 @@ class AbsoluteConvergence : public Convergence<TConfig>
         typedef Vector<typename TConfig_h::template setVecPrec<types::PODTypes<ValueTypeB>::vec_prec>::Type> PODVec_h;
         AbsoluteConvergence(AMG_Config &amg, const std::string &cfg_scope);
 
-        void convergence_init();
+        void convergence_init(Matrix<TConfig>& A, Vector<TConfig>& b, Vector<TConfig>& x);
 
         bool convergence_update_and_check(const PODVec_h &nrm, const PODVec_h &nrm_ini);
 };

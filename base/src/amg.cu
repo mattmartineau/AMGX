@@ -1022,7 +1022,7 @@ class AMG_Setup
                 }
 
                 // Build the hierarchy.
-                setup<TConfig1>( amg, level_1, min_coarse_rows, false ); 
+                setup<TConfig1>( amg, level_1, min_coarse_rows, false );
                 // Build the coarse solver.
                 Solver<TConfig1> *coarseSolver = amg->getCoarseSolver( memorySpaceTag1 );
 
@@ -1140,7 +1140,7 @@ class AMG_Solve
             assert(fine != NULL);
             CycleFactory<TConfig>::generate( amg, fine, b, x );
             fine->unsetInitCycle();
-            // Note: this sometimes takes too much time on host making GPU idle. 
+            // Note: this sometimes takes too much time on host making GPU idle.
             // Solve is not that important for memory - main mem usage comes from setup.
             // Disabling this call for now
             //MemoryInfo::updateMaxMemoryUsage();
@@ -1581,9 +1581,11 @@ template class AMG<AMGX_vecFloat, AMGX_matFloat, AMGX_indInt>;
 template class AMG<AMGX_vecDouble, AMGX_matFloat, AMGX_indInt>;
 
 // complex valued case
+#ifdef ENABLE_COMPLEX
 template class AMG<AMGX_vecComplex, AMGX_matComplex, AMGX_indInt>;
 template class AMG<AMGX_vecDoubleComplex, AMGX_matComplex, AMGX_indInt>;
 template class AMG<AMGX_vecDoubleComplex, AMGX_matDoubleComplex, AMGX_indInt>;
+#endif
 
 } // namespace amgx
 

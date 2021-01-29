@@ -38,7 +38,7 @@ RelativeAbsoluteCombinedConvergence<TConfig>::RelativeAbsoluteCombinedConvergenc
 }
 
 template<class TConfig>
-void RelativeAbsoluteCombinedConvergence<TConfig>::convergence_init()
+void RelativeAbsoluteCombinedConvergence<TConfig>::convergence_init(Matrix<TConfig>& A, Vector<TConfig>& b, Vector<TConfig>& x)
 {
     this->setTolerance(this->m_cfg->template getParameter<double>("tolerance", this->m_cfg_scope));
     this->m_alt_rel_tolerance = this->m_cfg->template getParameter<double>("alt_rel_tolerance", this->m_cfg_scope);

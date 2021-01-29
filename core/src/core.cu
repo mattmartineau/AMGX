@@ -83,6 +83,7 @@
 #include <convergence/relative_max.h>
 #include <convergence/relative_ini.h>
 #include <convergence/combined_rel_ini_abs.h>
+#include <convergence/scaled_abs_rel.h>
 
 #include <classical/classical_amg_level.h>
 #include <classical/interpolators/distance1.h>
@@ -592,6 +593,7 @@ struct registerClasses<T_Config, true>
         ConvergenceFactory<T_Config>::registerFactory("RELATIVE_INI", new RelativeIniConvergenceFactory<T_Config>);
         ConvergenceFactory<T_Config>::registerFactory("RELATIVE_MAX", new RelativeMaxConvergenceFactory<T_Config>);
         ConvergenceFactory<T_Config>::registerFactory("COMBINED_REL_INI_ABS", new RelativeAbsoluteCombinedConvergenceFactory<T_Config>);
+        ConvergenceFactory<T_Config>::registerFactory("SCALED_ABS_REL", new ScaledAbsRelConvergenceFactory<T_Config>);
     };
 };
 
@@ -699,6 +701,7 @@ struct registerClasses<T_Config, false>
         ConvergenceFactory<T_Config>::registerFactory("RELATIVE_INI", new RelativeIniConvergenceFactory<T_Config>);
         ConvergenceFactory<T_Config>::registerFactory("RELATIVE_MAX", new RelativeMaxConvergenceFactory<T_Config>);
         ConvergenceFactory<T_Config>::registerFactory("COMBINED_REL_INI_ABS", new RelativeAbsoluteCombinedConvergenceFactory<T_Config>);
+        ConvergenceFactory<T_Config>::registerFactory("SCALED_ABS_REL", new ScaledAbsRelConvergenceFactory<T_Config>);
         //Register Scaler
         ScalerFactory<T_Config>::registerFactory("DIAGONAL_SYMMETRIC", new DiagonalSymmetricScalerFactory<T_Config>);
         ScalerFactory<T_Config>::registerFactory("BINORMALIZATION", new BinormalizationScalerFactory<T_Config>);

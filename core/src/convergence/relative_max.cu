@@ -39,7 +39,7 @@ RelativeMaxConvergence<TConfig>::RelativeMaxConvergence(AMG_Config &cfg, const s
 }
 
 template<class TConfig>
-void RelativeMaxConvergence<TConfig>::convergence_init()
+void RelativeMaxConvergence<TConfig>::convergence_init(Matrix<TConfig>& A, Vector<TConfig>& b, Vector<TConfig>& x)
 {
     this->setTolerance(this->m_cfg->template getParameter<double>("tolerance", this->m_cfg_scope));
     _max_nrm.clear();

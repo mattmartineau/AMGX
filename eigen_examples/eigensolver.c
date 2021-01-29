@@ -120,30 +120,32 @@ int main(int argc, const char **argv)
       {
           mode = AMGX_mode_dFFI;
       }
+#ifdef ENABLE_COMPLEX
       else if (strncmp(argv[pidx + 1], "hCCI", 100) == 0)
       {
-          mode = AMGX_mode_hZZI;
+        mode = AMGX_mode_hZZI;
       }
       else if (strncmp(argv[pidx + 1], "hZCI", 100) == 0)
       {
-          mode = AMGX_mode_hZCI;
+        mode = AMGX_mode_hZCI;
       }
       else if (strncmp(argv[pidx + 1], "hZZI", 100) == 0)
       {
-          mode = AMGX_mode_hZZI;
+        mode = AMGX_mode_hZZI;
       }
       else if (strncmp(argv[pidx + 1], "dCCI", 100) == 0)
       {
-          mode = AMGX_mode_dCCI;
+        mode = AMGX_mode_dCCI;
       }
       else if (strncmp(argv[pidx + 1], "dZCI", 100) == 0)
       {
-          mode = AMGX_mode_dZCI;
+        mode = AMGX_mode_dZCI;
       }
       else if (strncmp(argv[pidx + 1], "dZZI", 100) == 0)
       {
-          mode = AMGX_mode_dZZI;
+        mode = AMGX_mode_dZZI;
       }
+#endif
       else
       {
           errAndExit("ERROR: invalid mode");
@@ -194,7 +196,7 @@ int main(int argc, const char **argv)
   }
   // write - uncomment to enable
   //AMGX_SAFE_CALL(AMGX_write_system(A, b, NULL, "output.system"));
-  
+
   // setup
   AMGX_SAFE_CALL(AMGX_eigensolver_setup(eigensolver, A));
   // PageRank setup

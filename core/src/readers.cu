@@ -167,6 +167,7 @@ cuDoubleComplex getBoostValue()
     return make_cuDoubleComplex(1e-6, 0.);
 }
 
+#ifdef ENABLE_COMPLEX
 template<AMGX_VecPrecision prec>
 struct vecRealToComplexPrec
 {
@@ -202,6 +203,7 @@ struct matRealToComplexPrec<AMGX_matFloat>
 {
     static const AMGX_MatPrecision CPrec = AMGX_matComplex;
 };
+#endif
 
 template <class TReal, class TComplex, class PartVec, bool init_flag>
 struct ReadAndConvert;
@@ -676,6 +678,8 @@ bool ReadMatrixMarket<TemplateConfig<AMGX_host, t_vecPrec, t_matPrec, t_indPrec>
     typedef typename Matrix_h::value_type ValueTypeA;// change later back to load in high precision!
     typedef typename TConfig_h::VecPrec ValueTypeB;
     std::string warning;
+
+#ifdef ENABLE_COMPLEX
     int complex_conversion = cfg.AMG_Config::getParameter<IndexType>("complex_conversion", "default");
 
     // if we are in the real-valued mode and complex conversion is specified and we are reading actual matrix
@@ -687,6 +691,7 @@ bool ReadMatrixMarket<TemplateConfig<AMGX_host, t_vecPrec, t_matPrec, t_indPrec>
         ReadAndConvert<TConfig_h, TComplex_h, IVector_h, types::util<ValueTypeA>::is_complex>::readAndConvert(fin, fname, complex_conversion, A, b, x, props, rank_rows);
         return true;
     }
+#endif
 
     //skip comments and read amgx relevant parameters
     std::list<string> nvConfig;
@@ -761,6 +766,7 @@ bool ReadMatrixMarket<TemplateConfig<AMGX_host, t_vecPrec, t_matPrec, t_indPrec>
         {
             if (*it == "symmetric") {symmetric = true; continue;}
 
+#ifdef ENABLE_COMPLEX
             if (*it == "complex")
             {
                 if (!types::util<ValueTypeA>::is_complex && complex_conversion == 0)
@@ -770,6 +776,7 @@ bool ReadMatrixMarket<TemplateConfig<AMGX_host, t_vecPrec, t_matPrec, t_indPrec>
 
                 continue;
             }
+#endif
 
             if (*it == "real")
             {
@@ -843,6 +850,7 @@ bool ReadMatrixMarket<TemplateConfig<AMGX_host, t_vecPrec, t_matPrec, t_indPrec>
     cols /= block_dimy;
     entries /= (block_dimx * block_dimy);
 
+#ifdef ENABLE_COMPLEX
     if (io_config::hasProps(io_config::SIZE, props))
     {
         if (complex_conversion != 0 && block_dimy * block_dimx != 1)
@@ -938,6 +946,7 @@ bool ReadMatrixMarket<TemplateConfig<AMGX_host, t_vecPrec, t_matPrec, t_indPrec>
 
         return true;
     }
+#endif
 
     warning = "Reading data...\n";
 

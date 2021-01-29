@@ -76,6 +76,7 @@ AMGX_Mode getModeFromString(const char *strmode)
     {
         return AMGX_mode_hFFI;
     }
+#ifdef ENABLE_COMPLEX
     else if (strcmp(strmode, "dZZI") == 0)
     {
         return AMGX_mode_dZZI;
@@ -100,6 +101,7 @@ AMGX_Mode getModeFromString(const char *strmode)
     {
         return AMGX_mode_hCCI;
     }
+#endif
     else
     {
         printf("Unknown mode: \"%s\"\n", strmode);
