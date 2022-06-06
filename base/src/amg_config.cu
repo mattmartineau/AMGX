@@ -290,6 +290,7 @@ AMGX_ERROR AMG_Config::parseString(std::string &params, int &config_version)
             while (params[pos] == ' ') { pos++; }  // skip spaces
 
             bool print = (pos == string::npos) || (params[pos] > '2');
+#if 0
             std::string ss = "Converting config string to current config version\n";
 
             if (print)
@@ -300,6 +301,7 @@ AMGX_ERROR AMG_Config::parseString(std::string &params, int &config_version)
                 amgx_output(ss.c_str(), ss.length());
 #endif
             }
+#endif
 
             convertToCurrentConfigVersion(params, config_version);
             ss = "Parsing configuration string: " + params + "\n";
@@ -666,8 +668,10 @@ AMGX_ERROR AMG_Config::parse_json_file(const char *filename)
         // start parsing
         if (json_parser.Parse<0>(params.c_str()).HasParseError())
         {
+#if 0
             std::string tmp = "Cannot read file as JSON object, trying as AMGX config\n";
             amgx_distributed_output(tmp.c_str(), tmp.length());
+#endif
             return AMGX_ERR_NOT_IMPLEMENTED; //
         }
 
@@ -701,8 +705,10 @@ AMGX_ERROR AMG_Config::parse_json_string(const char *str)
         // start parsing
         if (json_parser.Parse<0>(str).HasParseError())
         {
+#if 0
             std::string tmp = "Cannot read file as JSON object, trying as AMGX config\n";
             amgx_distributed_output(tmp.c_str(), tmp.length());
+#endif
             return AMGX_ERR_NOT_IMPLEMENTED; //
         }
 
