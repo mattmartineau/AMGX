@@ -235,6 +235,7 @@ void applyCorrection(ValueType lambda, const ValueType *e, ValueType *x, IndexTy
 //  Methods
 // ------------------------------
 
+#if 0
 //  Constructor
 template <class T_Config>
 Aggregation_AMG_Level_Base<T_Config>::Aggregation_AMG_Level_Base(AMG_Class *amg, ThreadManager *tmng) : AMG_Level<T_Config>(amg, tmng)
@@ -256,6 +257,7 @@ Aggregation_AMG_Level_Base<T_Config>::~Aggregation_AMG_Level_Base()
     delete m_selector;
     delete m_coarseAGenerator;
 }
+#endif
 
 template <class T_Config>
 void Aggregation_AMG_Level_Base<T_Config>::transfer_level(AMG_Level<TConfig1> *ref_lvl)
