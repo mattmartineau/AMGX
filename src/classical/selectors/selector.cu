@@ -357,6 +357,8 @@ estimate_c_hat_size_kernel( const int A_num_rows,
                 s_b_row_ids[warp_id * WARP_SIZE + dest] = a_col_id;
             }
 
+            utils::syncwarp();
+
             // For each warp, we have up to 32 rows of B to proceed.
             for ( int k = 0, num_rows = __popc(vote) ; k < num_rows ; k += NUM_LOADED_ROWS )
             {
@@ -678,6 +680,8 @@ compute_c_hat_kernel( int A_num_rows,
             {
                 s_b_row_ids[warp_id * WARP_SIZE + dest] = a_col_id;
             }
+
+            utils::syncwarp();
 
             int num_rows = __popc( vote );
 

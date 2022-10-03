@@ -577,6 +577,8 @@ compute_c_hat_kernel( int A_num_rows,
                 s_b_row_ids[warp_id * WARP_SIZE + dest] = a_col_id;
             }
 
+            utils::syncwarp();
+
             int num_rows = __popc( vote );
 
             // For each warp, we have up to 32 rows of B to proceed.
@@ -917,6 +919,8 @@ compute_interp_weight_kernel( const int A_num_rows,
                 s_b_row_ids[warp_id * WARP_SIZE + dest] = a_col_id;
                 s_b_values[warp_id * WARP_SIZE + dest] = a_value;
             }
+
+            utils::syncwarp();
 
             int num_rows = __popc( vote );
 

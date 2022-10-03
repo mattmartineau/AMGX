@@ -661,7 +661,7 @@ estimate_c_hat_size_kernel( const int A_num_rows,
 {
     const int NUM_WARPS = CTA_SIZE / WARP_SIZE;
     // A shared location where threads propose a row of B to load.
-    __shared__ volatile int s_b_row_ids[CTA_SIZE];
+    __shared__ int s_b_row_ids[CTA_SIZE];
     // The coordinates of the thread inside the CTA/warp.
     const int warp_id = utils::warp_id( );
     const int lane_id = utils::lane_id( );
@@ -719,7 +719,7 @@ estimate_c_hat_size_kernel( const int A_num_rows,
                 s_b_row_ids[warp_id * WARP_SIZE + dest] = a_col_id;
             }
 
-            __syncthreads();
+            utils::syncwarp();
 
             // For each warp, we have up to 32 rows of B to proceed.
             for ( int k = 0, num_rows = __popc(vote) ; k < num_rows ; ++k )
@@ -774,7 +774,7 @@ estimate_c_hat_size_kernel( const int A_num_rows,
     const int NUM_WARPS = CTA_SIZE / WARP_SIZE;
     const int NUM_LOADED_ROWS = WARP_SIZE / NUM_THREADS_PER_ROW;
     // A shared location where threads propose a row of B to load.
-    __shared__ volatile int s_b_row_ids[CTA_SIZE];
+    __shared__ int s_b_row_ids[CTA_SIZE];
     s_b_row_ids[threadIdx.x] = 0;
     __syncthreads();
 
@@ -916,7 +916,7 @@ compute_c_hat_kernel( int A_num_rows,
 
     const int NUM_WARPS = CTA_SIZE / WARP_SIZE;
     // Shared memory to vote.
-    __shared__ volatile int s_b_row_ids[CTA_SIZE];
+    __shared__ int s_b_row_ids[CTA_SIZE];
     // The hash keys stored in shared memory.
     __shared__ int s_keys[NUM_WARPS * SMEM_SIZE];
     // The coordinates of the thread inside the CTA/warp.
@@ -1079,7 +1079,7 @@ compute_c_hat_kernel( int A_num_rows,
     const int NUM_WARPS = CTA_SIZE / WARP_SIZE;
     const int NUM_LOADED_ROWS = WARP_SIZE / NUM_THREADS_PER_ROW;
     // Shared memory to vote.
-    __shared__ volatile int s_b_row_ids[CTA_SIZE];
+    __shared__ int s_b_row_ids[CTA_SIZE];
     // The hash keys stored in shared memory.
     __shared__ int s_keys[NUM_WARPS * SMEM_SIZE];
 
@@ -1264,9 +1264,9 @@ compute_inner_sum_kernel( const int A_num_rows,
     // The hash keys stored in shared memory.
     __shared__ int s_keys[NUM_WARPS * SMEM_SIZE];
     // A shared location where threads propose a row of B to load.
-    __shared__ volatile int s_b_row_ids[CTA_SIZE];
+    __shared__ int s_b_row_ids[CTA_SIZE];
     // A shared location where threads propose a value.
-    __shared__ volatile Value_type s_a_values[CTA_SIZE];
+    __shared__ Value_type s_a_values[CTA_SIZE];
     // The coordinates of the thread inside the CTA/warp.
     const int warp_id = utils::warp_id();
     const int lane_id = utils::lane_id();
@@ -1459,9 +1459,9 @@ compute_inner_sum_kernel( const int A_num_rows,
     // The hash keys stored in shared memory.
     __shared__ int s_keys[NUM_WARPS * SMEM_SIZE];
     // A shared location where threads propose a row of B to load.
-    __shared__ volatile int s_b_row_ids[CTA_SIZE];
+    __shared__ int s_b_row_ids[CTA_SIZE];
     // A shared location where threads propose a value.
-    __shared__ volatile Value_type s_a_values[CTA_SIZE];
+    __shared__ Value_type s_a_values[CTA_SIZE];
     // The coordinates of the thread inside the CTA/warp.
     const int warp_id = utils::warp_id();
     const int lane_id = utils::lane_id();
@@ -1670,9 +1670,9 @@ compute_interp_weight_kernel( const int A_num_rows,
     // The hash keys stored in shared memory.
     __shared__ int s_keys[NUM_WARPS * SMEM_SIZE];
     // A shared location where threads propose a row of B to load.
-    __shared__ volatile int s_b_row_ids[CTA_SIZE];
+    __shared__ int s_b_row_ids[CTA_SIZE];
     // A shared location where threads propose a value.
-    __shared__ volatile Value_type s_aki[NUM_WARPS];
+    __shared__ Value_type s_aki[NUM_WARPS];
     // The hash values stored in shared memory.
     __shared__ Value_type s_vals[NUM_WARPS * SMEM_SIZE];
     // The coordinates of the thread inside the CTA/warp.

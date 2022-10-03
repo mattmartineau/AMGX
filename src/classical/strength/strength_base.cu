@@ -218,9 +218,9 @@ void computeStrongConnectionsAndWeightsKernel( const IndexType *A_rows,
     // num_warps*numBlock rows. This means atomicAdd() is inevitable.
     const int num_warps = kCtaSize / 32;
     const int num_rows_per_iter = num_warps * gridDim.x;
-    __shared__ volatile ValueType smem[kCtaSize];
-    __shared__ volatile ValueType s_diag[num_warps];
-    __shared__ volatile ValueType s_threshold[num_warps];
+    __shared__ ValueType smem[kCtaSize];
+    __shared__ ValueType s_diag[num_warps];
+    __shared__ ValueType s_threshold[num_warps];
     const int warpId = threadIdx.x / 32;
     const int laneId = threadIdx.x % 32;
 
