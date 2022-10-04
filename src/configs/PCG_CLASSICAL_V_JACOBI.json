@@ -16,6 +16,7 @@
             "print_solve_stats": 0, 
             "aggressive_levels": 2,
             "dense_lu_num_rows": 1,
+            "structure_reuse_levels": -1,
             "presweeps": 1, 
             "postsweeps": 1,
             "interpolator": "D2",
