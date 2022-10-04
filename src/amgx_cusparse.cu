@@ -45,6 +45,61 @@
 
 namespace amgx
 {
+    template <class RT, class CT>
+    __global__ void check_if_need_sort(int nrows, RT* rows, CT* cols, int* nrows_to_sort)
+    {
+        int row = blockDim.x*blockIdx.x + threadIdx.x;
+        if(row >= nrows) return;
+
+        // Check if already sorted
+        bool needs_sort = false;
+        for(RT c = rows[row]+1; c < rows[row+1]; ++c)
+        {
+            if(cols[c] < cols[c-1])
+            {
+                needs_sort = true;
+                break;
+            }
+        }
+        if(needs_sort)
+        {
+            atomicAdd(nrows_to_sort, 1);
+        }
+    }
+
+    // EWWW - just for debugging
+    template <class RT, class CT, class VT>
+    __global__ void sort_matrix(int nrows, RT* rows, CT* cols, VT* vals)
+    {
+        int row = blockDim.x*blockIdx.x + threadIdx.x;
+        if(row >= nrows) return;
+
+        for(RT c0 = rows[row]; c0 < rows[row+1]; ++c0)
+        {
+            // Find smallest column in remaining range
+            RT small_c = c0;
+            for(RT c1 = c0+1; c1 < rows[row+1]; ++c1)
+            {
+                if(cols[c1] < cols[small_c])
+                {
+                    small_c = c1;
+                } 
+            }
+
+            if(small_c != c0)
+            {
+                // Swap col
+                CT small_col = cols[small_c];
+                cols[small_c] = cols[c0];
+                cols[c0] = small_col;
+
+                // Swap val
+                VT small_val = vals[small_c];
+                vals[small_c] = vals[c0];
+                vals[c0] = small_val;
+            }
+        }
+    }
 
 Cusparse::Cusparse() : m_handle(0)
 {
@@ -94,6 +149,32 @@ void Cusparse::bsrmv(
     ViewType view )
 {
     cudaStream_t null_stream = 0;
+
+#if 0
+    static int* nrows_to_sort_d;
+    if(nrows_to_sort_d == NULL) cudaMalloc(&nrows_to_sort_d, sizeof(int));
+    cudaMemset(nrows_to_sort_d, 0, sizeof(int));
+
+    check_if_need_sort<<<A.get_num_rows()/128 + 1, 128>>>(A.get_num_rows(), A.row_offsets.raw(), A.col_indices.raw(), nrows_to_sort_d);
+
+    int nrows_to_sort;
+    cudaMemcpy(&nrows_to_sort, nrows_to_sort_d, sizeof(int), cudaMemcpyDefault);
+
+    if(nrows_to_sort > 1)
+    {
+        auto col_copy = A.col_indices;
+        auto val_copy = A.values;
+
+        printf("Sorting %d rows\n", nrows_to_sort);
+        sort_matrix<<<A.get_num_rows()/128 + 1, 128>>>(A.get_num_rows(), A.row_offsets.raw(), A.col_indices.raw(), A.values.raw());
+        cudaDeviceSynchronize();
+
+        thrust::copy(col_copy.begin(), col_copy.end(), A.col_indices.begin());
+        thrust::copy(val_copy.begin(), val_copy.end(), A.values.begin());
+    }
+
+    //A.sortByRowAndColumn();
+#endif
 
     // If only COO, add CSR since bsrmv doesn't support COO
     if (A.hasProps(COO) && !A.hasProps(CSR))
@@ -150,6 +231,9 @@ void Cusparse::bsrmv_with_mask(
 {
     cudaStream_t null_stream = 0;
 
+    //sort_matrix<<<A.get_num_rows()/128 + 1, 128>>>(A.get_num_rows(), A.row_offsets.raw(), A.col_indices.raw(), A.values.raw());
+    //A.sortByRowAndColumn();
+
     // If only COO, add CSR since bsrmv doesn't support COO
     if (A.hasProps(COO) && !A.hasProps(CSR))
     {
@@ -203,6 +287,9 @@ void Cusparse::bsrmv_with_mask_restriction(
     //  A.computeDiagonal();
     //  A.set_initialized(1);
     //}
+    
+    //sort_matrix<<<R.get_num_rows()/128 + 1, 128>>>(R.get_num_rows(), R.row_offsets.raw(), R.col_indices.raw(), R.values.raw());
+    //R.sortByRowAndColumn();
 
     bool latencyHiding = (R.getViewInterior() != R.getViewExterior() && !P.is_matrix_singleGPU() && x.dirtybit != 0);
 
@@ -251,6 +338,9 @@ void Cusparse::bsrxmv(
         A.set_initialized(1);
     }
 
+    //sort_matrix<<<A.get_num_rows()/128 + 1, 128>>>(A.get_num_rows(), A.row_offsets.raw(), A.col_indices.raw(), A.values.raw());
+    //A.sortByRowAndColumn();
+
     const int *start_offsets, *end_offsets;
     start_offsets = A.row_offsets.raw();
     end_offsets = A.row_offsets.raw() + 1;
@@ -296,6 +386,9 @@ void Cusparse::bsrmv( const typename TConfig::VecPrec alphaConst,
                       ViewType view )
 {
     cudaStream_t null_stream = 0;
+
+    //sort_matrix<<<A.get_num_rows()/128 + 1, 128>>>(A.get_num_rows(), A.row_offsets.raw(), A.col_indices.raw(), A.values.raw());
+    //A.sortByRowAndColumn();
 
     // If only COO, add CSR since bsrmv doesn't support COO
     if (A.hasProps(COO) && !A.hasProps(CSR))
@@ -384,6 +477,9 @@ void Cusparse::bsrmv( ColumnColorSelector columnColorSelector,
 {
     cudaStream_t null_stream = 0;
 
+    //sort_matrix<<<A.get_num_rows()/128 + 1, 128>>>(A.get_num_rows(), A.row_offsets.raw(), A.col_indices.raw(), A.values.raw());
+    //A.sortByRowAndColumn();
+
     // If only COO, add CSR since bsrmv doesn't support COO
     if (A.hasProps(COO) && !A.hasProps(CSR))
     {
@@ -471,6 +567,9 @@ void Cusparse::bsrmv( const int color,
                       ViewType view)
 {
     cudaStream_t null_stream = 0;
+
+    //sort_matrix<<<A.get_num_rows()/128 + 1, 128>>>(A.get_num_rows(), A.row_offsets.raw(), A.col_indices.raw(), A.values.raw());
+    //A.sortByRowAndColumn();
 
     // If only COO, add CSR since bsrmv doesn't support COO
     if (A.hasProps(COO) && !A.hasProps(CSR))
