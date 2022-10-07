@@ -611,7 +611,7 @@ void CommsMPIHostBufferStream<T_Config>::do_add_from_halo(T &b, const Matrix<TCo
 }
 
 template<typename TConfig, typename Tb>
-void exchange_halo_send(Tb& b, Matrix<TConfig>& m, int num_rings, int offset, cudaStream_t stream = NULL)
+void exchange_halo_send(Tb& b, const Matrix<TConfig>& m, int num_rings, int offset, MPI_Comm mpi_comm, int tag = -1, cudaStream_t stream = NULL)
 {
 #ifdef AMGX_WITH_MPI
     int bsize = b.get_block_size();
@@ -636,7 +636,7 @@ void exchange_halo_send(Tb& b, Matrix<TConfig>& m, int num_rings, int offset, cu
                   size * sizeof(typename Tb::value_type),
                   MPI_BYTE,
                   m.manager->neighbors[i],
-                  m_tag,
+                  tag,
                   mpi_comm,
                   &b.requests[i]);
     }
@@ -650,7 +650,7 @@ void CommsMPIHostBufferStream<T_Config>::do_exchange_halo(T &b, const Matrix<TCo
 {
 #ifdef AMGX_WITH_MPI
     typedef typename T::value_type value_type;
-    exchange_halo_send(b, m, num_rings, 0);
+    exchange_halo_send(b, m, num_rings, 0, mpi_comm);
     ExcHalo2Functor<T_Config, T> ex2(b, m, num_rings, 0);
     ExcHalo3Functor<T_Config, T> ex3(b, m, num_rings, 0);
     FSMVisitor<T_Config> fsmV;
