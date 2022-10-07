@@ -610,21 +610,52 @@ void CommsMPIHostBufferStream<T_Config>::do_add_from_halo(T &b, const Matrix<TCo
 #endif
 }
 
+template<typename TConfig, typename Tb>
+void exchange_halo_send(Tb& b, Matrix<TConfig>& m, int num_rings, int offset, cudaStream_t stream = NULL)
+{
+#ifdef AMGX_WITH_MPI
+    int bsize = b.get_block_size();
+    int neighbors = m.manager->num_neighbors();
+    int num_cols = b.get_num_cols();
+
+    cudaStreamSynchronize(stream);
+
+    //#####################################################################
+    //#     RULE: for send use what Hostbuffer copies from, in step 1;    #
+    //#               start position: where it starts copying from;       #
+    //#               size: same as for hostbuffer;                       #
+    //#                                                                   #
+    //#           for recv use what Hostbuffer copies into, in step 3;    #
+    //#               start position: where it starts copying to;         #
+    //#               size: same as for hostbuffer;                       #
+    //#####################################################################
+    for (int i = 0; i < neighbors; i++)
+    {
+        int size = m.manager->getB2Lrings()[i][num_rings] * bsize * num_cols;
+        MPI_Isend(b.linear_buffers[i],
+                  size * sizeof(typename Tb::value_type),
+                  MPI_BYTE,
+                  m.manager->neighbors[i],
+                  m_tag,
+                  mpi_comm,
+                  &b.requests[i]);
+    }
+
+#endif
+}
+
 template <class T_Config>
 template <class T>
 void CommsMPIHostBufferStream<T_Config>::do_exchange_halo(T &b, const Matrix<TConfig> &m, int num_rings)
 {
 #ifdef AMGX_WITH_MPI
     typedef typename T::value_type value_type;
-    ExcHalo1Functor<T_Config, T> ex1(b, m, num_rings, 0);
+    exchange_halo_send(b, m, num_rings, 0);
     ExcHalo2Functor<T_Config, T> ex2(b, m, num_rings, 0);
     ExcHalo3Functor<T_Config, T> ex3(b, m, num_rings, 0);
     FSMVisitor<T_Config> fsmV;
-    fsmV.get_functors().push_back(&ex1);
     fsmV.get_functors().push_back(&ex2);
     fsmV.get_functors().push_back(&ex3);
-    Accept(fsmV);
-    fsmV.next();//advance FSM
     b.in_transfer = RECEIVING | SENDING;
     Accept(fsmV);
     ex3.get_offset() = ex2.get_offset();//pass relevant info from one state to another
