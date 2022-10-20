@@ -1140,7 +1140,7 @@ void count_non_zeroes_kernel_opt( const int A_num_rows,
     const int a_row_id = blockIdx.x * ngroups + group_id;
 
     // Block-level hash container storage
-    __shared__ int key_s[ngroups*HASH_SIZE];
+    extern __shared__ int key_s[];
     __shared__ int counts[ngroups];
 
     // Initialise the keys and values.
@@ -1155,7 +1155,6 @@ void count_non_zeroes_kernel_opt( const int A_num_rows,
         counts[i] = 0;
     }
 
-    //__syncwarp();
     __syncthreads();
 
     int* key_group_s = &key_s[group_id*HASH_SIZE];
@@ -1205,7 +1204,6 @@ void count_non_zeroes_kernel_opt( const int A_num_rows,
         }
     }
 
-    //__syncwarp();
     __syncthreads();
 
     // Store the results.
@@ -1278,7 +1276,6 @@ void compute_values_kernel_opt( const int A_num_rows,
         col_ind_s[group_id] = 0;
     }
 
-    //__syncwarp();
     __syncthreads();
 
     if(a_row_id < A_num_rows)
@@ -1299,6 +1296,8 @@ void compute_values_kernel_opt( const int A_num_rows,
                 int b_col_id = B_cols[b_col_it];
 
                 int hash = b_col_id % HASH_SIZE;
+
+                int trip = 0;
 
                 // By construction this algorithm should guarantee 
                 // all keys can be inserted
@@ -1325,18 +1324,24 @@ void compute_values_kernel_opt( const int A_num_rows,
 
                     // We did not secure a slot, so linear probe to next slot
                     hash = (hash + 1) % HASH_SIZE;
+
+                    trip++;
+
+                    if(trip >= HASH_SIZE)
+                    {
+                        printf("trip exceeded max\n");
+                        break;
+                    }
                 }
             }
         }
     }
 
-    //__syncwarp();
     __syncthreads();
 
     // Store the results.
     int c_row_id  = a_row_id;
     int c_col_it  = C_rows[c_row_id];
-    int c_col_end = C_rows[c_row_id + 1];
 
     if(a_row_id < A_num_rows)
     {
@@ -2171,13 +2176,18 @@ void CSR_Multiply_Detail<TemplateConfig<AMGX_device, V, M, I> >::count_non_zeroe
                     C_row_max_block.raw());
 
     int max_nnz = amgx::thrust::reduce(
-        C_row_max_block.raw(), 
-        C_row_max_block.raw() + C_row_max_block.size(), 
+        C_row_max_block.begin(), 
+        C_row_max_block.end(), 
         0, amgx::thrust::maximum<int>());
 
 #define CNZ_OPT(group_size, hash_size) \
+    constexpr int ngroups = cta_size / group_size; \
+    constexpr int shmem_size = hash_size * ngroups * sizeof(int); \
+    cudaFuncSetAttribute(csr_multiply_detail::count_non_zeroes_kernel_opt \
+            <group_size, cta_size, hash_size>, \
+            cudaFuncAttributeMaxDynamicSharedMemorySize, shmem_size); \
     csr_multiply_detail::count_non_zeroes_kernel_opt<group_size, cta_size, hash_size> \
-        <<<grid_size, cta_size>>>( \
+        <<<grid_size, cta_size, shmem_size>>>( \
         A.get_num_rows(), \
         A.row_offsets.raw(), \
         A.col_indices.raw(), \
@@ -2202,9 +2212,14 @@ void CSR_Multiply_Detail<TemplateConfig<AMGX_device, V, M, I> >::count_non_zeroe
                 { 
                     CNZ_OPT(16, 512); 
                 } 
-                else  
+                else if(max_nnz < 1024)
                 { 
                     CNZ_OPT(16, 1024); 
+                }
+                else
+                {
+                    printf("Max strict upper bound for largest row of C is %d nnz\n", max_nnz);
+                    FatalError("Problem is too dense for opt kernels\n", AMGX_ERR_NOT_IMPLEMENTED);
                 }
             }
             break;
@@ -2223,10 +2238,23 @@ void CSR_Multiply_Detail<TemplateConfig<AMGX_device, V, M, I> >::count_non_zeroe
                 { 
                     CNZ_OPT(32, 512); 
                 } 
-                else  
+                else if(max_nnz < 1024)
                 { 
                     CNZ_OPT(32, 1024); 
                 }
+                else if(max_nnz < 2048)
+                { 
+                    CNZ_OPT(32, 2048); 
+                }
+                else
+                { 
+                    CNZ_OPT(32, 4096); 
+                }
+                //else
+                //{
+                //    printf("Max strict upper bound for largest row of C is %d nnz\n", max_nnz);
+                //    FatalError("Problem is too dense for opt kernels\n", AMGX_ERR_NOT_IMPLEMENTED);
+                //}
             }
             break;
 
@@ -2282,29 +2310,18 @@ void CSR_Multiply_Detail<TemplateConfig<AMGX_device, V, M, I> >::cvk_opt(const M
 
 
 template< AMGX_VecPrecision V, AMGX_MatPrecision M, AMGX_IndPrecision I >
-void CSR_Multiply_Detail<TemplateConfig<AMGX_device, V, M, I> >::compute_values_opt( const Matrix_d &A, const Matrix_d &B, Matrix_d &C, int num_threads )
+void CSR_Multiply_Detail<TemplateConfig<AMGX_device, V, M, I> >::compute_values_opt( const Matrix_d &A, const Matrix_d &B, Matrix_d &C, int num_threads, int max_nnz)
 {
-    int C_nrows = C.get_num_rows();
-    int C_nnz = C.get_num_nz();
-    int C_avg_nnz_per_row = C_nnz / C_nrows;
-
-    // The aim is to minimise the hash size while reducing the impact of the linear
-    // probing. It might actually be more optimal to just use as large tables as 
-    // possible, reducing the linear probing cost and maximising the C write cost?
-    float C_avg_nnz_log2 = log2(static_cast<float>(C_avg_nnz_per_row));
-    float C_avg_nnz_log2_ceil = ceil(C_avg_nnz_log2);
-    int C_rounded_avg = static_cast<int>(2.0*pow(2.0, C_avg_nnz_log2_ceil));
-
-    printf("num_threads %d\n", num_threads);
-    printf("C_nrows %d C_nnz %d\n", C_nrows, C_nnz);
-    printf("C_rounded_avg %d\n", C_rounded_avg);
+    int max_nnz_rounded = static_cast<int>(pow(2.0, ceil(log2(max_nnz))));
+    printf("max_nnz = %d\n", max_nnz);
+    printf("max_nnz_rounded = %d\n", max_nnz_rounded);
 
     // Operation is group per row, where group size is determined by num_threads
     switch ( num_threads )
     {
         case 16: // 16 threads per group
             {
-                switch(C_rounded_avg)
+                switch(max_nnz_rounded)
                 {
                     case 2: 
                     case 4:
@@ -2316,13 +2333,14 @@ void CSR_Multiply_Detail<TemplateConfig<AMGX_device, V, M, I> >::compute_values_
                     case 256: cvk_opt<256, 8>(A, B, C); break;
                     case 512: cvk_opt<512, 16>(A, B, C); break;
                     default: 
+                       printf("Requested hash size %d\n", max_nnz_rounded);
                        FatalError("In compute_values_opt the requested hash size is too large.\n", AMGX_ERR_NOT_IMPLEMENTED);
                 }
             }
             break;
         case 32: // Warp per group
             {
-                switch(C_rounded_avg)
+                switch(max_nnz_rounded)
                 {
                     case 2: 
                     case 4:
@@ -2335,6 +2353,7 @@ void CSR_Multiply_Detail<TemplateConfig<AMGX_device, V, M, I> >::compute_values_
                     case 512: cvk_opt<512, 32>(A, B, C); break;
                     case 1024: cvk_opt<1024, 32>(A, B, C); break;
                     default: 
+                       printf("Requested hash size %d\n", max_nnz_rounded);
                        FatalError("In compute_values_opt the requested hash size is too large.\n", AMGX_ERR_NOT_IMPLEMENTED);
                 }
             }

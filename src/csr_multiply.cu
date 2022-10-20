@@ -612,6 +612,24 @@ void CSR_Multiply_Impl<TemplateConfig<AMGX_device, V, M, I> >::multiply_opt(
 
     this->count_non_zeroes_opt(A, B, C, 32);
 
+    // At this point the data contained in C.row_offsets is actually nnz counts per row
+    // We can use that to determine the max size per row to optimise the shared mem utilisation later
+    int max_nnz = amgx::thrust::reduce(C.row_offsets.begin(), C.row_offsets.end()-1, 0, amgx::thrust::maximum<int>());
+
+
+    if(C.row_offsets.size() == 737598)
+    {
+        std::vector<int> rows_counts(C.row_offsets.size());
+        cudaMemcpy(rows_counts.data(), C.row_offsets.raw(), sizeof(int)*C.row_offsets.size(), cudaMemcpyDefault);
+        std::ofstream f("opt_row_counts");
+        for(int i = 0; i < C.row_offsets.size(); ++i)
+        {
+            f << rows_counts[i] << std::endl;
+        }
+        f.close();
+    }
+
+
     // Compute row offsets.
     this->compute_offsets( C );
 
@@ -626,7 +644,7 @@ void CSR_Multiply_Impl<TemplateConfig<AMGX_device, V, M, I> >::multiply_opt(
     C.set_block_dimy(B.get_block_dimy());
     C.setColsReorderedByColor(false);
 
-    this->compute_values_opt(A, B, C, 32);
+    this->compute_values_opt(A, B, C, 32, max_nnz);
     
     // Finalize the initialization of the matrix.
     C.set_initialized(1);
@@ -684,6 +702,22 @@ void CSR_Multiply_Impl<TemplateConfig<AMGX_device, V, M, I> >::multiply( const M
 
     if ( done )
     {
+
+
+        if(C.row_offsets.size() == 737598)
+        {
+            std::vector<int> rows_counts(C.row_offsets.size());
+            cudaMemcpy(rows_counts.data(), C.row_offsets.raw(), sizeof(int)*C.row_offsets.size(), cudaMemcpyDefault);
+            std::ofstream f("orig_row_counts");
+            for(int i = 0; i < C.row_offsets.size(); ++i)
+            {
+                f << rows_counts[i] << std::endl;
+            }
+            f.close();
+        }
+
+
+
        // Compute row offsets.
        this->compute_offsets( C );
        // Allocate memory to store columns/values.
@@ -810,7 +844,7 @@ void CSR_Multiply_Impl<TemplateConfig<AMGX_device, V, M, I> >::galerkin_product(
     }
 
     nvtxRangePush("AP");
-    if(this->m_use_opt_kernels)
+    if(true || this->m_use_opt_kernels)
     {
         this->multiply_opt( A, P, AP );
     }
@@ -831,7 +865,7 @@ void CSR_Multiply_Impl<TemplateConfig<AMGX_device, V, M, I> >::galerkin_product(
     RAP.set_initialized(0);
 
     nvtxRangePush("RAP");
-    if(this->m_use_opt_kernels)
+    if(true || this->m_use_opt_kernels)
     {
         this->multiply_opt( R, AP, RAP );
     }
