@@ -32,7 +32,6 @@
 #include <thrust/copy.h>
 #include <basic_types.h>
 #include <util.h>
-#include <ld_functions.h>
 #include <thrust/logical.h>
 #include <sm_utils.inl>
 #include <texture.h>
@@ -587,7 +586,7 @@ void DenseLUSolver<TemplateConfig<AMGX_device, V, M, I> >::cudense_getrf()
 
     if (m_trf_wspace)
     {
-        amgx::thrust::global_thread_handle::cudaFreeAsync(m_trf_wspace);
+        amgx::memory::cudaFreeAsync(m_trf_wspace);
         m_trf_wspace = 0;
     }
 }
@@ -625,11 +624,11 @@ allocMem(DataType *&ptr,
          IndexType numEntry,
          bool initToZero)
 {
-    if ( ptr != NULL ) { amgx::thrust::global_thread_handle::cudaFreeAsync(ptr); }
+    if ( ptr != NULL ) { amgx::memory::cudaFreeAsync(ptr); }
 
     cudaCheckError();
     size_t sz = numEntry * sizeof(DataType);
-    amgx::thrust::global_thread_handle::cudaMalloc((void **)&ptr, sz);
+    amgx::memory::cudaMalloc((void **)&ptr, sz);
     cudaCheckError();
 
     if (initToZero)
@@ -701,22 +700,22 @@ DenseLUSolver<TemplateConfig<AMGX_device, V, M, I> >::~DenseLUSolver()
 
     if (m_dense_A)
     {
-        amgx::thrust::global_thread_handle::cudaFreeAsync(m_dense_A);
+        amgx::memory::cudaFreeAsync(m_dense_A);
     }
 
     if (m_ipiv)
     {
-        amgx::thrust::global_thread_handle::cudaFreeAsync(m_ipiv);
+        amgx::memory::cudaFreeAsync(m_ipiv);
     }
 
     if (m_trf_wspace)
     {
-        amgx::thrust::global_thread_handle::cudaFreeAsync(m_trf_wspace);
+        amgx::memory::cudaFreeAsync(m_trf_wspace);
     }
 
     if (m_cuds_info)
     {
-        amgx::thrust::global_thread_handle::cudaFreeAsync(m_cuds_info);
+        amgx::memory::cudaFreeAsync(m_cuds_info);
     }
 
     cudaCheckError();
@@ -875,7 +874,7 @@ solver_setup(bool reuse_matrix_structure)
 
         const int block_size = 256;
         const int num_warps = block_size / WARP_SIZE;
-        const int grid_size = std::min(4096, (A->get_num_rows() + num_warps - 1) / num_warps);
+        const int grid_size = (m_nnz_global + num_warps - 1) / num_warps;
         cudaStream_t stream = amgx::thrust::global_thread_handle::get_stream();
         csr_to_dense_kernel<Matrix_data, Vector_data, WARP_SIZE><<<grid_size, block_size, 0, stream>>>(
             m_num_rows,

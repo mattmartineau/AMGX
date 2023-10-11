@@ -82,6 +82,14 @@ MemoryPool::MemoryPool(size_t max_block_size, size_t page_size, size_t max_size)
     , m_recently_merged(false)
 {
     //initializeCriticalSection(&m_mutex2);
+
+#ifndef USE_LEGACY_MEMPOOL
+    int device;
+    cudaGetDevice(&device);
+    cudaDeviceGetMemPool(&m_mem_pool, device);
+    uint64_t max_threshold = std::numeric_limits<uint64_t>::max();
+    cudaMemPoolSetAttribute(m_mem_pool, cudaMemPoolAttrReleaseThreshold, &max_threshold);
+#endif
 }
 
 MemoryPool::~MemoryPool()
@@ -456,6 +464,7 @@ struct MemoryManager
     MemoryManager()
         : m_main_pinned_pool(NULL)
         , m_main_device_pool(NULL)
+        , m_main_stream(0)
         , m_use_async_free(false)
         , m_use_device_pool(false)
         , m_alloc_scaling_factor(0)
@@ -829,7 +838,6 @@ cudaError_t cudaFreeHost(void *ptr)
     }
     else
     {
-//printf("calling cudaFreeHost\n");
         error = ::cudaFreeHost(ptr);
     }
 
@@ -838,6 +846,15 @@ cudaError_t cudaFreeHost(void *ptr)
 
 cudaError_t cudaMalloc(void **ptr, size_t size)
 {
+#ifndef USE_LEGACY_MEMPOOL
+
+    cudaError_t e = ::cudaMallocAsync(ptr, size, getStream());
+    if(e != cudaSuccess) { return e; }
+
+    return cudaStreamSynchronize(0);
+
+#else
+
     AMGX_CPU_PROFILER("cudaMalloc");
 #ifdef AMGX_PRINT_MALLOC_CALL_STACK
 #ifdef MULTIGPU
@@ -942,10 +959,17 @@ cudaError_t cudaMalloc(void **ptr, size_t size)
 
 #endif
     return error;
+#endif
 }
 
 cudaError_t cudaFreeAsync(void *ptr)
 {
+#ifndef USE_LEGACY_MEMPOOL
+
+    return ::cudaFreeAsync(ptr, getStream());
+
+#else
+
     AMGX_CPU_PROFILER("cudaFreeAsync");
 #ifdef AMGX_PRINT_MALLOC_CALL_STACK
 #ifdef MULTIGPU
@@ -1052,10 +1076,12 @@ cudaError_t cudaFreeAsync(void *ptr)
 
 #endif
     return status;
+#endif
 }
 
 void cudaFreeWait()
 {
+    cudaStreamSynchronize(0);
 }
 
 // Join device pools

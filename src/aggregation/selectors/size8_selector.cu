@@ -67,7 +67,7 @@ scalar_t count_block_results_pinned_memory(const int a, const int i, const int n
 
     if (ret == 0)
     {
-        amgx::thrust::global_thread_handle::cudaMallocHost((void **)&ret, buffers * sizeof(scalar_t));
+        amgx::memory::cudaMallocHost((void **)&ret, buffers * sizeof(scalar_t));
         ret[0] = 0;
         cudaEventCreateWithFlags(&throttle_event, cudaEventDisableTiming);
     }
@@ -430,8 +430,8 @@ void computeEdgeWeightsBlockDiaCsr_V2_1(
 
             i  = row_indices[tid];
             j  = column_indices[tid];
-            d1 = types::util<ValueType>::abs(__cachingLoad(&nonzero_values[__load_nc(dia_values + i) * bsize_sq + matrix_weight_entry]));
-            d2 = types::util<ValueType>::abs(__cachingLoad(&nonzero_values[__load_nc(dia_values + j) * bsize_sq + matrix_weight_entry]));
+            d1 = types::util<ValueType>::abs(__cachingLoad(&nonzero_values[__ldg(dia_values + i) * bsize_sq + matrix_weight_entry]));
+            d2 = types::util<ValueType>::abs(__cachingLoad(&nonzero_values[__ldg(dia_values + j) * bsize_sq + matrix_weight_entry]));
         }
 
         const bool valid_j = valid_tid && i != j && j < num_owned;
@@ -453,7 +453,7 @@ void computeEdgeWeightsBlockDiaCsr_V2_1(
 
         for ( int k = kmin ; k < kmax ; ++k )
         {
-            const int idx = __load_nc(column_indices + k);
+            const int idx = __ldg(column_indices + k);
 
             if (idx == i)
             {
@@ -707,7 +707,7 @@ void Size8Selector<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indPrec> 
         {
             matchEdges <<< num_blocks, threads_per_block, 0, stream>>>(num_block_rows, partner_index_ptr, aggregates_ptr, strongest_neighbour_ptr);
             cudaCheckError();
-            numUnassigned = (int)amgx::thrust::count(partner_index.begin(), partner_index.begin() + num_block_rows, -1);
+            numUnassigned = (int)thrust_wrapper::count<AMGX_device>(partner_index.begin(), partner_index.begin() + num_block_rows, -1);
             cudaCheckError();
         }
         else
@@ -767,7 +767,7 @@ void Size8Selector<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indPrec> 
         if (avoid_thrust_count == 0)
         {
             matchAggregatesSize4 <IndexType> <<< num_blocks, threads_per_block, 0, stream>>>(aggregates_ptr, aggregated_ptr, strongest_neighbour_ptr, partner_index_ptr, num_block_rows);
-            numUnassigned = amgx::thrust::count(aggregated.begin(), aggregated.end(), -1);
+            numUnassigned = thrust_wrapper::count<AMGX_device>(aggregated.begin(), aggregated.end(), -1);
         }
         else
         {
@@ -840,7 +840,7 @@ void Size8Selector<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indPrec> 
         if (avoid_thrust_count == 0)
         {
             matchAggregates <IndexType> <<< num_blocks, threads_per_block, 0, stream>>>(aggregates_ptr, aggregated_ptr, strongest_neighbour_ptr, num_block_rows);
-            numUnassigned = amgx::thrust::count(aggregated.begin(), aggregated.end(), -1);
+            numUnassigned = thrust_wrapper::count<AMGX_device>(aggregated.begin(), aggregated.end(), -1);
         }
         else
         {
@@ -863,7 +863,7 @@ void Size8Selector<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indPrec> 
             mergeWithExistingAggregatesBlockDiaCsr <<< num_blocks, threads_per_block, 0, stream>>>(A_row_offsets_ptr, A_column_indices_ptr, edge_weights_ptr, num_block_rows, aggregates_ptr, aggregated_ptr, this->deterministic, (IndexType *) NULL, local_iter > 1);
             cudaCheckError();
             numUnassigned_previous = numUnassigned;
-            numUnassigned = (int)amgx::thrust::count(aggregated.begin(), aggregated.end(), -1);
+            numUnassigned = (int)thrust_wrapper::count<AMGX_device>(aggregated.begin(), aggregated.end(), -1);
             cudaCheckError();
             local_iter++;
         }
@@ -882,7 +882,7 @@ void Size8Selector<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_indPrec> 
             if (avoid_thrust_count == 0)
             {
                 joinExistingAggregates <<< num_blocks, threads_per_block, 0, stream>>>(num_block_rows, aggregates_ptr, aggregated_ptr, aggregates_candidate.raw());
-                numUnassigned = (int)amgx::thrust::count(aggregated.begin(), aggregated.end(), -1);
+                numUnassigned = (int)thrust_wrapper::count<AMGX_device>(aggregated.begin(), aggregated.end(), -1);
             }
             else
             {
