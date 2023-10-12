@@ -621,6 +621,7 @@ void AMG_Config::import_json_object(rapidjson::Value &obj, bool outer)
             std::string err = "Cannot import parameter \"" + std::string(iter->name.GetString()) + "\" of type " + std::string(json_type_names[iter->value.GetType()]);
         }
     }
+    printAMGConfig();
 }
 
 AMGX_ERROR AMG_Config::parse_json_file(const char *filename)

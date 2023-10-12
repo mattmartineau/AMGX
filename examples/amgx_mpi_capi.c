@@ -250,6 +250,9 @@ int main(int argc, char **argv)
         errAndExit("ERROR: no config was specified");
     }
 
+    pidx = findParamIndex(argv, argc, "-amg2");
+    const char* cfg_string = argv[pidx+1];
+
     /* example of how to handle errors */
     //char msg[MAX_MSG_LEN];
     //AMGX_RC err_code = AMGX_resources_create(NULL, cfg, &amgx_mpi_comm, 1, &lrank);
@@ -339,8 +342,8 @@ int main(int argc, char **argv)
     MPI_Barrier(amgx_mpi_comm);
     AMGX_solver_solve(solver, b, x);
     /* example of how to change parameters between non-linear iterations */
-    //AMGX_config_add_parameters(&cfg, "config_version=2, default:tolerance=1e-12");
-    //AMGX_solver_solve(solver, b, x);
+    AMGX_config_add_parameters(&cfg, cfg_string);
+    AMGX_solver_solve(solver, b, x);
     /* example of how to replace coefficients between non-linear iterations */
     //AMGX_matrix_replace_coefficients(A, n, nnz, values, diag);
     //AMGX_solver_setup(solver, A);
