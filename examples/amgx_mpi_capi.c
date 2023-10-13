@@ -343,6 +343,7 @@ int main(int argc, char **argv)
     AMGX_solver_solve(solver, b, x);
     /* example of how to change parameters between non-linear iterations */
     AMGX_config_add_parameters(&cfg, cfg_string);
+    AMGX_solver_resetup(solver, A);
     AMGX_solver_solve(solver, b, x);
     /* example of how to replace coefficients between non-linear iterations */
     //AMGX_matrix_replace_coefficients(A, n, nnz, values, diag);
