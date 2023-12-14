@@ -178,6 +178,12 @@ Selector<T_Config> *chooseAggressiveSelector(AMG_Config *m_cfg, std::string std_
         FatalError("No aggressive selector chosen", AMGX_ERR_NOT_IMPLEMENTED);
     }
 
+    int use_opt_kernels = m_cfg->AMG_Config::template getParameter<int>("use_opt_kernels", "default");
+    if(use_opt_kernels)
+    {
+        cfg_string += ",use_opt_kernels=1";
+    }
+
     cfg.parseParameterString(cfg_string.c_str());
     // now allocate the selector and interpolator
     return classical::SelectorFactory<T_Config>::allocate(cfg, "default" /*std_scope*/);
