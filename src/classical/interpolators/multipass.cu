@@ -944,8 +944,8 @@ compute_c_hat_kernel_opt( int assigned_set_size,
                       int *__restrict C_hat_size,
                       KeyType *__restrict C_hat,
                       int *__restrict C_hat_pos,
-                      int *__restrict assigned,
-                      int *__restrict assigned_set,
+                      const int *__restrict assigned,
+                      const int *__restrict assigned_set,
                       int pass )
 {
     constexpr KeyType SLOT_VACANT = -1;
@@ -963,19 +963,16 @@ compute_c_hat_kernel_opt( int assigned_set_size,
     // Block-level hash container storage
     KeyType* key_s = (KeyType*)s;
 
-    //KeyType* data_s = (KeyType*)&key_s[ngroups*HASH_SIZE];
     int* col_ind_s = (int*)&key_s[ngroups*HASH_SIZE];
 
     // Group-level hash containers
     KeyType* key_group_s = &key_s[group_id*HASH_SIZE];
-    //KeyType* data_group_s = &data_s[group_id*HASH_SIZE];
 
     // Initialise the keys and values.
 #pragma unroll
     for(int i = threadIdx.x; i < ngroups*HASH_SIZE; i += CTA_SIZE)
     {
         key_s[i] = SLOT_VACANT; // Inserted keys will be in range [0,N]
-        //data_s[i] = 0; // We will sum into values
     }
 
     if(lane_id == 0)
@@ -2172,9 +2169,11 @@ void Multipass_Interpolator<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_
             A.manager->exchange_halo(C_hat_size, C_hat_size.tag);
         }
 
+        int max_c_hat_size = thrust::reduce(C_hat_size.begin(), C_hat_size.end(), -1, thrust::maximum<int>());
+
         for (int i = 2; i < num_passes; i++)
         {
-            if(false && this->m_use_opt_kernels)
+            if(this->m_use_opt_kernels)
             {
                 I64Vector_d C_hat_(C_hat);
                 IntVector C_hat_pos_(C_hat_pos);
@@ -2189,13 +2188,11 @@ void Multipass_Interpolator<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_
 
                 thrust_wrapper::inclusive_scan<AMGX_device>(assigned_in_pass.begin(), assigned_in_pass.end(), assigned_offs.begin()+1);
 
-                int nassigned_in_pass = assigned_offs[assigned_offs.size()-1] ;
+                int nassigned_in_pass = assigned_offs[assigned_offs.size()-1];
                 if(nassigned_in_pass > 0)
                 {
                     IntVector assigned_set(nassigned_in_pass);
                     assigned_set_fill<<<nblocks, nthreads>>>(assigned.size(), assigned_in_pass.raw(), assigned_offs.raw(), assigned_set.raw());
-
-                    int max_c_hat_size = thrust::reduce(C_hat_size_.begin(), C_hat_size_.end(), -1, thrust::maximum<int>());
 
                     int hash_size = pow(2, ceil(log2(max_c_hat_size)));
 
@@ -2244,16 +2241,15 @@ void Multipass_Interpolator<TemplateConfig<AMGX_device, t_vecPrec, t_matPrec, t_
                 cudaDeviceSynchronize();
                 cudaCheckError();
 
-#if 0
                 if (A.is_matrix_distributed())
                 {
-                    //TODO: We could probably reduce the amount of data exchanged here, since we only need to exchange for recently updated nodes
+                    //TODO: We could probably reduce the amount of data exchanged here, 
+                    // since we only need to exchange for recently updated nodes
                     C_hat_.dirtybit = 1;
                     C_hat_matrix.manager->exchange_halo(C_hat_, C_hat_.tag);
                     C_hat_size_.dirtybit = 1;
                     A.manager->exchange_halo(C_hat_size_, C_hat_size_.tag);
                 }
-#endif
             }
             else
             {
