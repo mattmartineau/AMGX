@@ -33,6 +33,7 @@
 #include <thrust/device_malloc.h>
 #include <thrust/device_free.h>
 #include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
 #include <limits>
 #include <stdexcept>
 #include <amgx_config.h>
@@ -261,5 +262,8 @@ class thrust_amgx_allocator<T, AMGX_host>
 
 template<class T>
 using device_vector_alloc = amgx::thrust::device_vector<T, thrust_amgx_allocator<T, AMGX_device>>;
+
+template<class T>
+using host_vector_alloc = amgx::thrust::host_vector<T, thrust_amgx_allocator<T, AMGX_host>>;
 
 } // end amgx

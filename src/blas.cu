@@ -673,10 +673,10 @@ typename Vector::value_type dotc(const Vector &a, const Vector &b, int offset, i
         size = a_last - a_first;
         const value_type *a_raw = a.raw() + a_first;
         const value_type *b_raw = b.raw() + b_first;
-        value_type result;
-        Cublas::dot(size, a_raw, 1, b_raw, 1, &result);
+        host_vector_alloc<value_type> result(1);
+        Cublas::dot(size, a_raw, 1, b_raw, 1, amgx::thrust::raw_pointer_cast(&result[0]));
         cudaCheckError();
-        return result;
+        return result[0];
     }
 }
 
